@@ -1,15 +1,23 @@
-import { FormEvent, useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { FormEvent, useEffect, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigate, useParams } from "react-router-dom";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Field } from "@/components/ui/Field";
 import { useAuth } from "@/features/auth/AuthProvider";
-import { createClient } from "@/services/clients.service";
+import {
+  createClient,
+  getClientWithBalance,
+  updateClient,
+  type CreateClientInput,
+  type UpdateClientInput,
+} from "@/services/clients.service";
 
 export function ClientFormPage() {
   const navigate = useNavigate();
+  const { clientId } = useParams();
   const queryClient = useQueryClient();
   const { user } = useAuth();
+  const isEditing = Boolean(clientId);
   const [fullName, setFullName] = useState("");
   const [identification, setIdentification] = useState("");
   const [phone, setPhone] = useState("");
@@ -19,15 +27,42 @@ export function ClientFormPage() {
   const [notes, setNotes] = useState("");
   const [formError, setFormError] = useState("");
 
+  const {
+    data: existingClient,
+    isLoading: existingClientLoading,
+    error: existingClientError,
+  } = useQuery({
+    queryKey: ["client", clientId],
+    queryFn: () => getClientWithBalance(clientId ?? ""),
+    enabled: isEditing,
+  });
+
+  useEffect(() => {
+    if (!existingClient) {
+      return;
+    }
+
+    setFullName(existingClient.full_name);
+    setIdentification(existingClient.identification ?? "");
+    setPhone(existingClient.phone ?? "");
+    setAddress(existingClient.address ?? "");
+    setReferenceName(existingClient.reference_name ?? "");
+    setReferencePhone(existingClient.reference_phone ?? "");
+    setNotes(existingClient.notes ?? "");
+  }, [existingClient]);
+
   const mutation = useMutation({
-    mutationFn: createClient,
+    mutationFn: (input: CreateClientInput | UpdateClientInput) => ("clientId" in input ? updateClient(input) : createClient(input)),
     onSuccess: async (client) => {
-      await queryClient.invalidateQueries({ queryKey: ["clients"] });
-      await queryClient.invalidateQueries({ queryKey: ["dashboard-summary"] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["clients"] }),
+        queryClient.invalidateQueries({ queryKey: ["client", client.id] }),
+        queryClient.invalidateQueries({ queryKey: ["dashboard-summary"] }),
+      ]);
       navigate(`/clients/${client.id}`);
     },
     onError: () => {
-      setFormError("No se pudo crear el cliente. Revisa la conexion y que la migracion este aplicada.");
+      setFormError(isEditing ? "No se pudo actualizar el cliente. Revisa la conexion e intenta otra vez." : "No se pudo crear el cliente. Revisa la conexion y que la migracion este aplicada.");
     },
   });
 
@@ -36,7 +71,7 @@ export function ClientFormPage() {
     setFormError("");
 
     if (!user) {
-      setFormError("Debes iniciar sesion para crear clientes.");
+      setFormError(isEditing ? "Debes iniciar sesion para editar clientes." : "Debes iniciar sesion para crear clientes.");
       return;
     }
 
@@ -45,7 +80,7 @@ export function ClientFormPage() {
       return;
     }
 
-    mutation.mutate({
+    const input = {
       userId: user.id,
       fullName,
       identification,
@@ -54,15 +89,37 @@ export function ClientFormPage() {
       referenceName,
       referencePhone,
       notes,
-    });
+    };
+
+    if (isEditing) {
+      mutation.mutate({
+        ...input,
+        clientId: clientId ?? "",
+      });
+      return;
+    }
+
+    mutation.mutate(input);
+  }
+
+  if (existingClientLoading) {
+    return <article className="rounded-lg border border-kredo-line bg-white p-4 text-sm text-kredo-muted">Cargando cliente...</article>;
+  }
+
+  if (existingClientError) {
+    return <article className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm font-medium text-kredo-red">No se pudo cargar el cliente.</article>;
+  }
+
+  if (isEditing && !existingClient) {
+    return <article className="rounded-lg border border-kredo-line bg-white p-4 text-sm text-kredo-muted">Cliente no encontrado.</article>;
   }
 
   return (
     <section>
       <PageHeader
         eyebrow="Clientes"
-        title="Crear cliente"
-        description="Registra los datos basicos. Los saldos se calcularan solo desde movimientos."
+        title={isEditing ? "Editar perfil" : "Crear cliente"}
+        description={isEditing ? undefined : "Registra los datos basicos. Los saldos se calcularan solo desde movimientos."}
       />
 
       <form className="space-y-4 rounded-lg border border-kredo-line bg-white p-4" onSubmit={handleSubmit}>
@@ -126,7 +183,7 @@ export function ClientFormPage() {
           disabled={mutation.isPending}
           type="submit"
         >
-          {mutation.isPending ? "Guardando..." : "Crear cliente"}
+          {mutation.isPending ? "Guardando..." : isEditing ? "Guardar cambios" : "Crear cliente"}
         </button>
       </form>
     </section>

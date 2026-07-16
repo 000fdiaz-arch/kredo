@@ -30,6 +30,7 @@ export const router = createBrowserRouter([
           { path: "/clients", element: <ClientsPage /> },
           { path: "/clients/new", element: <ClientFormPage /> },
           { path: "/clients/:clientId", element: <ClientProfilePage /> },
+          { path: "/clients/:clientId/edit", element: <ClientFormPage /> },
           { path: "/loans/new", element: <LoanFormPage /> },
           { path: "/payments/new", element: <PaymentFormPage /> },
           { path: "/cycles", element: <CyclesPage /> },

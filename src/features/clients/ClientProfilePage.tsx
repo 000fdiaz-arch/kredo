@@ -131,7 +131,12 @@ export function ClientProfilePage() {
           <p className="text-sm text-kredo-muted">Telefono</p>
           <p className="font-semibold">{client.phone ?? "Pendiente"}</p>
         </div>
-        <StatusBadge status={client.status} />
+        <div className="flex flex-col items-end gap-2">
+          <StatusBadge status={client.status} />
+          <Link className="rounded-md border border-kredo-line px-3 py-2 text-sm font-semibold" to={`/clients/${client.id}/edit`}>
+            Editar perfil
+          </Link>
+        </div>
       </div>
 
       <div className="mb-4 grid grid-cols-2 gap-3">

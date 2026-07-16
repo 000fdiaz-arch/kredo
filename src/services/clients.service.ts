@@ -19,6 +19,10 @@ export type CreateClientInput = {
   notes?: string;
 };
 
+export type UpdateClientInput = CreateClientInput & {
+  clientId: string;
+};
+
 function normalizeOptional(value?: string) {
   const trimmed = value?.trim();
   return trimmed ? trimmed : null;
@@ -51,6 +55,30 @@ export async function createClient(input: CreateClientInput): Promise<ClientRow>
       notes: normalizeOptional(input.notes),
       status: "no_movements",
     })
+    .select("*")
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  return data;
+}
+
+export async function updateClient(input: UpdateClientInput): Promise<ClientRow> {
+  const { data, error } = await supabase
+    .from("clients")
+    .update({
+      full_name: input.fullName.trim(),
+      identification: normalizeOptional(input.identification),
+      phone: normalizeOptional(input.phone),
+      address: normalizeOptional(input.address),
+      reference_name: normalizeOptional(input.referenceName),
+      reference_phone: normalizeOptional(input.referencePhone),
+      notes: normalizeOptional(input.notes),
+    })
+    .eq("id", input.clientId)
+    .eq("user_id", input.userId)
     .select("*")
     .single();
 
