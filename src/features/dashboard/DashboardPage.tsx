@@ -85,9 +85,26 @@ export function DashboardPage() {
                 <p className="font-semibold">{formatMoney(client.balance?.total_balance_cents ?? 0)}</p>
               </div>
             </div>
-            <Link className="mt-4 inline-flex min-h-11 w-full items-center justify-center rounded-md border border-kredo-line font-semibold" to={`/clients/${client.id}`}>
-              Ver detalle
-            </Link>
+            <div className="mt-4 grid grid-cols-3 gap-2">
+              <Link
+                className="inline-flex min-h-11 items-center justify-center rounded-md bg-kredo-primary px-3 text-sm font-semibold text-white"
+                to={`/loans/new?clientId=${client.id}`}
+              >
+                Prestamo
+              </Link>
+              <Link
+                className="inline-flex min-h-11 items-center justify-center rounded-md bg-kredo-green px-3 text-sm font-semibold text-white"
+                to={`/payments/new?clientId=${client.id}`}
+              >
+                Pago
+              </Link>
+              <Link
+                className="inline-flex min-h-11 items-center justify-center rounded-md border border-kredo-line px-3 text-sm font-semibold"
+                to={`/clients/${client.id}`}
+              >
+                Detalle
+              </Link>
+            </div>
           </article>
         ))}
 

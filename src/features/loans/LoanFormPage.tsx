@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { FormEvent, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Field } from "@/components/ui/Field";
 import { SelectField } from "@/components/ui/SelectField";
@@ -13,9 +13,10 @@ import { getCycleRange, toDateInputValue } from "@/lib/dates";
 
 export function LoanFormPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const queryClient = useQueryClient();
   const { user } = useAuth();
-  const [clientId, setClientId] = useState("");
+  const [clientId, setClientId] = useState(searchParams.get("clientId") ?? "");
   const [loanDate, setLoanDate] = useState(toDateInputValue());
   const [amount, setAmount] = useState("");
   const [interestRate, setInterestRate] = useState("10");
