@@ -54,7 +54,9 @@ type PaymentInterestStatusRow = {
   interest_amount_cents: number;
 };
 
-function calculateDisplayStatus(client: ClientWithBalance, lateInterestCents: number): ClientStatus {
+type ZeroInterestLoanStatusRow = Pick<Database["public"]["Tables"]["loans"]["Row"], "client_id">;
+
+function calculateDisplayStatus(client: ClientWithBalance, lateInterestCents: number, hasZeroInterestLoan: boolean): ClientStatus {
   if (client.status === "inactive") {
     return "inactive";
   }
@@ -64,6 +66,10 @@ function calculateDisplayStatus(client: ClientWithBalance, lateInterestCents: nu
   const totalBalanceCents = client.balance?.total_balance_cents ?? 0;
 
   if (lateInterestCents > 0) {
+    return "late";
+  }
+
+  if (hasZeroInterestLoan && principalBalanceCents > 0) {
     return "late";
   }
 
@@ -153,12 +159,39 @@ async function getLateInterestByClient(clientIds: string[]) {
   );
 }
 
+async function getClientsWithZeroInterestLoans(clientIds: string[]) {
+  if (clientIds.length === 0) {
+    return new Set<string>();
+  }
+
+  const { data, error } = await supabase
+    .from("loans")
+    .select("client_id")
+    .in("client_id", clientIds)
+    .eq("interest_rate_bps", 0)
+    .is("voided_at", null);
+
+  if (error) {
+    throw error;
+  }
+
+  return new Set(((data ?? []) as ZeroInterestLoanStatusRow[]).map((loan) => loan.client_id));
+}
+
 async function applyDisplayStatuses<T extends ClientWithBalance>(clients: T[]): Promise<T[]> {
-  const lateInterestByClient = await getLateInterestByClient(clients.map((client) => client.id));
+  const clientIds = clients.map((client) => client.id);
+  const [lateInterestByClient, clientsWithZeroInterestLoans] = await Promise.all([
+    getLateInterestByClient(clientIds),
+    getClientsWithZeroInterestLoans(clientIds),
+  ]);
 
   return clients.map((client) => ({
     ...client,
-    status: calculateDisplayStatus(client, lateInterestByClient.get(client.id) ?? 0),
+    status: calculateDisplayStatus(
+      client,
+      lateInterestByClient.get(client.id) ?? 0,
+      clientsWithZeroInterestLoans.has(client.id),
+    ),
   }));
 }
 
