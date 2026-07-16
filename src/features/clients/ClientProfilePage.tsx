@@ -218,7 +218,7 @@ export function ClientProfilePage() {
         <Link className="min-h-12 rounded-md bg-kredo-primary px-3 py-3 text-center font-semibold text-white" to="/loans/new">
           Nuevo prestamo
         </Link>
-        <Link className="min-h-12 rounded-md border border-kredo-line bg-white px-3 py-3 text-center font-semibold" to="/payments/new">
+        <Link className="min-h-12 rounded-md border border-kredo-line bg-white px-3 py-3 text-center font-semibold" to={`/payments/new?clientId=${client.id}`}>
           Registrar pago
         </Link>
       </div>

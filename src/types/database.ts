@@ -173,6 +173,55 @@ export type Database = {
         };
         Relationships: [];
       };
+      payments: {
+        Row: {
+          id: string;
+          user_id: string;
+          client_id: string;
+          cycle_id: string;
+          payment_date: string;
+          total_amount_cents: number;
+          interest_amount_cents: number;
+          principal_amount_cents: number;
+          payment_method: "cash" | "bank_transfer" | "yappy" | "ach" | "other";
+          reference_number: string | null;
+          notes: string | null;
+          overpayment_confirmed: boolean;
+          created_at: string;
+          updated_at: string;
+          voided_at: string | null;
+          voided_by: string | null;
+          void_reason: string | null;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          client_id: string;
+          cycle_id: string;
+          payment_date: string;
+          total_amount_cents: number;
+          interest_amount_cents?: number;
+          principal_amount_cents?: number;
+          payment_method: "cash" | "bank_transfer" | "yappy" | "ach" | "other";
+          reference_number?: string | null;
+          notes?: string | null;
+          overpayment_confirmed?: boolean;
+          created_at?: string;
+          updated_at?: string;
+          voided_at?: string | null;
+          voided_by?: string | null;
+          void_reason?: string | null;
+        };
+        Update: {
+          reference_number?: string | null;
+          notes?: string | null;
+          updated_at?: string;
+          voided_at?: string | null;
+          voided_by?: string | null;
+          void_reason?: string | null;
+        };
+        Relationships: [];
+      };
       audit_logs: {
         Row: {
           id: string;
