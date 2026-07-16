@@ -1,3 +1,4 @@
+import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { Plus, Search } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
@@ -7,23 +8,47 @@ import { formatMoney } from "@/lib/money";
 import { listClientsWithBalances } from "@/services/clients.service";
 
 export function ClientsPage() {
+  const [searchTerm, setSearchTerm] = useState("");
   const { data: clients = [], isLoading, error } = useQuery({
     queryKey: ["clients"],
     queryFn: listClientsWithBalances,
   });
+
+  const normalizedSearch = searchTerm.trim().toLocaleLowerCase();
+  const filteredClients = useMemo(() => {
+    if (!normalizedSearch) {
+      return clients;
+    }
+
+    return clients.filter((client) =>
+      [
+        client.full_name,
+        client.identification,
+        client.phone,
+        client.client_code,
+      ]
+        .filter((value): value is string => Boolean(value))
+        .some((value) => value.toLocaleLowerCase().includes(normalizedSearch)),
+    );
+  }, [clients, normalizedSearch]);
 
   return (
     <section>
       <PageHeader
         eyebrow="Clientes"
         title="Clientes"
-        description="Listado mobile-first preparado para busqueda, filtros y saldos calculados."
       />
 
       <div className="mb-4 flex gap-2">
         <label className="flex min-h-12 flex-1 items-center gap-2 rounded-md border border-kredo-line bg-white px-3">
           <Search className="h-5 w-5 text-kredo-muted" aria-hidden="true" />
-          <input className="min-w-0 flex-1 bg-transparent text-base outline-none" placeholder="Nombre, cedula o telefono" type="search" />
+          <input
+            className="min-w-0 flex-1 bg-transparent text-base outline-none"
+            onChange={(event) => setSearchTerm(event.target.value)}
+            placeholder="Nombre, cedula o telefono"
+            type="search"
+            value={searchTerm}
+          />
         </label>
         <Link className="inline-flex min-h-12 items-center justify-center rounded-md bg-kredo-primary px-4 text-white" to="/clients/new">
           <Plus className="h-5 w-5" aria-hidden="true" />
@@ -41,7 +66,7 @@ export function ClientsPage() {
       ) : null}
 
       <div className="space-y-3">
-        {clients.map((client) => (
+        {filteredClients.map((client) => (
           <article className="rounded-lg border border-kredo-line bg-white p-4" key={client.id}>
             <div className="flex items-start justify-between gap-3">
               <div>
@@ -75,6 +100,12 @@ export function ClientsPage() {
       {!isLoading && !error && clients.length === 0 ? (
         <article className="rounded-lg border border-dashed border-kredo-line bg-white p-4 text-sm text-kredo-muted">
           Aun no hay clientes en Supabase.
+        </article>
+      ) : null}
+
+      {!isLoading && !error && clients.length > 0 && filteredClients.length === 0 ? (
+        <article className="rounded-lg border border-dashed border-kredo-line bg-white p-4 text-sm text-kredo-muted">
+          No hay clientes que coincidan con la busqueda.
         </article>
       ) : null}
     </section>
