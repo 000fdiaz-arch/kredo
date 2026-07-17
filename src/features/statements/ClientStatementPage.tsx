@@ -17,6 +17,33 @@ function Row({ label, value }: { label: string; value: string }) {
   );
 }
 
+function getErrorDetail(error: unknown) {
+  if (error instanceof DOMException) {
+    if (error.name === "AbortError") {
+      return "El envio fue cancelado desde el menu de compartir.";
+    }
+
+    return `${error.name}: ${error.message}`;
+  }
+
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return "El navegador no entrego un detalle tecnico.";
+}
+
+function downloadBlob(blob: Blob, fileName: string) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
 export function ClientStatementPage() {
   const { clientId = "" } = useParams();
   const statementRef = useRef<HTMLElement | null>(null);
@@ -71,14 +98,9 @@ export function ClientStatementPage() {
 
     try {
       const blob = await createStatementImage();
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = imageFileName;
-      link.click();
-      URL.revokeObjectURL(url);
-    } catch {
-      setShareError("No se pudo generar la imagen. Intenta otra vez.");
+      downloadBlob(blob, imageFileName);
+    } catch (downloadError) {
+      setShareError(`No se pudo generar o descargar la imagen. Motivo: ${getErrorDetail(downloadError)}`);
     } finally {
       setIsPreparingImage(false);
     }
@@ -89,27 +111,32 @@ export function ClientStatementPage() {
     setIsPreparingImage(true);
 
     try {
-      const blob = await createStatementImage();
-      const file = new File([blob], imageFileName, { type: "image/png" });
-
-      if (navigator.canShare?.({ files: [file] })) {
-        await navigator.share({
-          title: "Estado de cuenta",
-          text: `Estado de cuenta de ${client.full_name}`,
-          files: [file],
-        });
+      if (!window.isSecureContext) {
+        setShareError("No se puede compartir directo porque la pagina no esta en un contexto seguro HTTPS.");
         return;
       }
 
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = imageFileName;
-      link.click();
-      URL.revokeObjectURL(url);
-      setShareError("Tu navegador no permite compartir directo. Descarga la imagen y enviala por WhatsApp.");
-    } catch {
-      setShareError("No se pudo compartir la imagen. Intenta descargarla.");
+      if (!("share" in navigator)) {
+        setShareError("Este navegador no tiene menu nativo de compartir. Usa el boton Imagen y enviala por WhatsApp.");
+        return;
+      }
+
+      const blob = await createStatementImage();
+      const file = new File([blob], imageFileName, { type: "image/png" });
+
+      if (!navigator.canShare?.({ files: [file] })) {
+        downloadBlob(blob, imageFileName);
+        setShareError("El navegador abre compartir, pero no acepta imagenes generadas por la web. Descarga la imagen y enviala por WhatsApp.");
+        return;
+      }
+
+      await navigator.share({
+        title: "Estado de cuenta",
+        text: `Estado de cuenta de ${client.full_name}`,
+        files: [file],
+      });
+    } catch (shareError) {
+      setShareError(`No se pudo compartir la imagen. Motivo: ${getErrorDetail(shareError)}`);
     } finally {
       setIsPreparingImage(false);
     }
