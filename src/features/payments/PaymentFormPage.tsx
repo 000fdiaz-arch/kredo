@@ -305,7 +305,7 @@ export function PaymentFormPage() {
 
         <button
           className="min-h-12 w-full rounded-md bg-kredo-primary px-4 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
-          disabled={isGeneratingInterest || mutation.isPending}
+          disabled={mutation.isPending}
           type="submit"
         >
           Revisar pago
