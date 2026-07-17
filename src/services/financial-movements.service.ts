@@ -258,6 +258,11 @@ export async function getFinancialIndicators(activePortfolioCents: number): Prom
   };
 }
 
+export async function getAvailableCashCents() {
+  const movements = await listFinancialMovements();
+  return calculateFinancialSummary(movements).availableCashCents;
+}
+
 export function getMovementTypeLabel(type: FinancialMovementType) {
   const labels: Record<FinancialMovementType, string> = {
     capital_contribution: "Aporte de capital",

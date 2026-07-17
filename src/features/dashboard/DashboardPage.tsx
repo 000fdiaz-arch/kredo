@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { Plus, Search } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
+import { useMemo, useState } from "react";
 import { MetricCard } from "@/components/ui/MetricCard";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { StatusBadge } from "@/components/ui/StatusBadge";
@@ -16,10 +17,24 @@ function formatPercent(value: number) {
 }
 
 export function DashboardPage() {
+  const [searchTerm, setSearchTerm] = useState("");
   const { data, isLoading, error } = useQuery({
     queryKey: ["dashboard-summary"],
     queryFn: getDashboardSummary,
   });
+  const normalizedSearchTerm = searchTerm.trim().toLowerCase();
+  const visibleClients = useMemo(() => {
+    if (!normalizedSearchTerm) {
+      return data?.clients ?? [];
+    }
+
+    return (data?.clients ?? []).filter((client) => (
+      client.full_name.toLowerCase().includes(normalizedSearchTerm) ||
+      client.client_code.toLowerCase().includes(normalizedSearchTerm) ||
+      (client.identification ?? "").toLowerCase().includes(normalizedSearchTerm) ||
+      (client.phone ?? "").toLowerCase().includes(normalizedSearchTerm)
+    ));
+  }, [data?.clients, normalizedSearchTerm]);
 
   return (
     <section>
@@ -108,8 +123,10 @@ export function DashboardPage() {
           <Search className="h-5 w-5 text-kredo-muted" aria-hidden="true" />
           <input
             className="min-w-0 flex-1 bg-transparent text-base outline-none"
+            onChange={(event) => setSearchTerm(event.target.value)}
             placeholder="Buscar cliente"
             type="search"
+            value={searchTerm}
           />
         </label>
         <Link
@@ -132,7 +149,7 @@ export function DashboardPage() {
       ) : null}
 
       <div className="space-y-3">
-        {(data?.clients ?? []).map((client) => (
+        {visibleClients.map((client) => (
           <article className="rounded-lg border border-kredo-line bg-white p-4" key={client.id}>
             <div className="flex items-start justify-between gap-3">
               <div>
@@ -181,6 +198,12 @@ export function DashboardPage() {
         {!isLoading && !error && (data?.clients.length ?? 0) === 0 ? (
           <article className="rounded-lg border border-dashed border-kredo-line bg-white p-4 text-sm text-kredo-muted">
             Aun no hay clientes en Supabase.
+          </article>
+        ) : null}
+
+        {!isLoading && !error && (data?.clients.length ?? 0) > 0 && visibleClients.length === 0 ? (
+          <article className="rounded-lg border border-dashed border-kredo-line bg-white p-4 text-sm text-kredo-muted">
+            No hay clientes que coincidan con la busqueda.
           </article>
         ) : null}
       </div>

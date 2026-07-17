@@ -10,6 +10,8 @@ import { useAuth } from "@/features/auth/AuthProvider";
 import { createLoan } from "@/services/loans.service";
 import { formatMoney } from "@/lib/money";
 import { getCycleRange, toDateInputValue } from "@/lib/dates";
+import { getAvailableCashCents } from "@/services/financial-movements.service";
+import { calculateLendingLimitGuidance } from "@/services/lending-limits";
 
 export function LoanFormPage() {
   const navigate = useNavigate();
@@ -29,10 +31,22 @@ export function LoanFormPage() {
     queryFn: listClientsWithBalances,
   });
 
+  const { data: availableCashCents = 0 } = useQuery({
+    queryKey: ["available-cash"],
+    queryFn: getAvailableCashCents,
+  });
+
   const selectedClient = clients.find((client) => client.id === clientId);
   const amountCents = Math.round(Number(amount || "0") * 100);
   const interestRateBps = Math.round(Number(interestRate || "0") * 100);
   const cycleRange = useMemo(() => getCycleRange(loanDate), [loanDate]);
+  const lendingGuidance = calculateLendingLimitGuidance(availableCashCents, amountCents);
+  const riskToneClass = {
+    ok: "border-green-200 bg-green-50 text-kredo-green",
+    review: "border-yellow-200 bg-yellow-50 text-kredo-yellow",
+    exceptional: "border-red-200 bg-red-50 text-kredo-red",
+    over_cash: "border-red-200 bg-red-50 text-kredo-red",
+  }[lendingGuidance.riskLevel];
 
   const mutation = useMutation({
     mutationFn: createLoan,
@@ -128,6 +142,13 @@ export function LoanFormPage() {
           type="number"
           value={amount}
         />
+        <article className={`rounded-md border px-3 py-3 text-sm ${riskToneClass}`}>
+          <p className="font-semibold">Limite por persona: {formatMoney(lendingGuidance.recommendedLimitCents)}</p>
+          <p className="mt-1 text-kredo-muted">
+            Caja disponible {formatMoney(lendingGuidance.availableCashCents)} - Normal {formatMoney(lendingGuidance.normalLimitCents)} - Excepcion {formatMoney(lendingGuidance.exceptionalLimitCents)}
+          </p>
+          {amountCents > 0 ? <p className="mt-2 font-medium">{lendingGuidance.message}</p> : null}
+        </article>
         <Field
           inputMode="decimal"
           label="Interes (%)"
@@ -167,6 +188,14 @@ export function LoanFormPage() {
               <div className="flex justify-between gap-3">
                 <dt className="text-kredo-muted">Monto</dt>
                 <dd className="font-semibold">{formatMoney(amountCents)}</dd>
+              </div>
+              <div className="flex justify-between gap-3">
+                <dt className="text-kredo-muted">Limite recomendado</dt>
+                <dd className="font-semibold">{formatMoney(lendingGuidance.recommendedLimitCents)}</dd>
+              </div>
+              <div className="flex justify-between gap-3">
+                <dt className="text-kredo-muted">Evaluacion</dt>
+                <dd className="text-right font-semibold">{lendingGuidance.message}</dd>
               </div>
               <div className="flex justify-between gap-3">
                 <dt className="text-kredo-muted">Interes</dt>
