@@ -221,6 +221,9 @@ export function ClientProfilePage() {
         <Link className="min-h-12 rounded-md border border-kredo-line bg-white px-3 py-3 text-center font-semibold" to={`/payments/new?clientId=${client.id}`}>
           Registrar pago
         </Link>
+        <Link className="col-span-2 min-h-12 rounded-md border border-kredo-line bg-white px-3 py-3 text-center font-semibold" to={`/clients/${client.id}/statement`}>
+          Estado de cuenta
+        </Link>
       </div>
 
       <div>

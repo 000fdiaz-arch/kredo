@@ -14,6 +14,7 @@ import { HistoryPage } from "@/features/history/HistoryPage";
 import { ReportsPage } from "@/features/reports/ReportsPage";
 import { SettingsPage } from "@/features/settings/SettingsPage";
 import { ReceiptPage } from "@/features/receipts/ReceiptPage";
+import { ClientStatementPage } from "@/features/statements/ClientStatementPage";
 import { NotFoundPage } from "@/components/layout/NotFoundPage";
 
 export const router = createBrowserRouter([
@@ -41,6 +42,7 @@ export const router = createBrowserRouter([
           { path: "/reports", element: <ReportsPage /> },
           { path: "/settings", element: <SettingsPage /> },
           { path: "/receipts/:receiptType/:receiptId", element: <ReceiptPage /> },
+          { path: "/clients/:clientId/statement", element: <ClientStatementPage /> },
         ],
       },
     ],
