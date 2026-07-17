@@ -9,6 +9,7 @@ import { ClientFormPage } from "@/features/clients/ClientFormPage";
 import { LoanFormPage } from "@/features/loans/LoanFormPage";
 import { PaymentFormPage } from "@/features/payments/PaymentFormPage";
 import { CyclesPage } from "@/features/cycles/CyclesPage";
+import { CyclePaymentsPage } from "@/features/cycles/CyclePaymentsPage";
 import { HistoryPage } from "@/features/history/HistoryPage";
 import { ReportsPage } from "@/features/reports/ReportsPage";
 import { SettingsPage } from "@/features/settings/SettingsPage";
@@ -33,6 +34,7 @@ export const router = createBrowserRouter([
           { path: "/clients/:clientId/edit", element: <ClientFormPage /> },
           { path: "/loans/new", element: <LoanFormPage /> },
           { path: "/payments/new", element: <PaymentFormPage /> },
+          { path: "/cycles/payments", element: <CyclePaymentsPage /> },
           { path: "/cycles", element: <CyclesPage /> },
           { path: "/history", element: <HistoryPage /> },
           { path: "/reports", element: <ReportsPage /> },
