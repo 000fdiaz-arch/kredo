@@ -32,7 +32,11 @@ export function DashboardPage() {
         <MetricCard
           label="Pagos del ciclo"
           value={formatMoney(data?.cyclePaymentsCents ?? 0)}
-          helper={`Capital ${formatMoney(data?.cyclePrincipalRecoveredCents ?? 0)} · Interes ${formatMoney(data?.cycleInterestCollectedCents ?? 0)}`}
+          helper={
+            data
+              ? `Ciclo ${data.cyclePaymentStartDate} al ${data.cyclePaymentEndDate} · Capital ${formatMoney(data.cyclePrincipalRecoveredCents)} · Interes ${formatMoney(data.cycleInterestCollectedCents)}`
+              : "Cargando ciclo actual"
+          }
           tone="green"
         />
         <MetricCard
