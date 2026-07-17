@@ -1,6 +1,7 @@
 import { listClientsWithBalances } from "@/services/clients.service";
 import { getNextCloseDate } from "@/lib/dates";
 import { getCurrentCyclePaymentBreakdown } from "@/services/cycle-payments.service";
+import { getFinancialIndicators } from "@/services/financial-movements.service";
 import type { ClientWithBalance } from "@/services/clients.service";
 
 const statusPriority = {
@@ -46,19 +47,38 @@ export async function getDashboardSummary() {
 
   const activeClients = clients.filter((client) => client.status !== "inactive");
   const lateClients = clients.filter((client) => client.status === "late");
+  const activePortfolioCents = clients.reduce((total, client) => total + (client.balance?.principal_balance_cents ?? 0), 0);
+  const pendingInterestCents = clients.reduce((total, client) => total + (client.balance?.interest_balance_cents ?? 0), 0);
+  const totalPortfolioCents = clients.reduce((total, client) => total + (client.balance?.total_balance_cents ?? 0), 0);
+  const financial = await getFinancialIndicators(activePortfolioCents);
 
   return {
     clients: sortClientsByUrgency(clients),
-    capitalLentCents: clients.reduce((total, client) => total + (client.balance?.principal_balance_cents ?? 0), 0),
-    pendingInterestCents: clients.reduce((total, client) => total + (client.balance?.interest_balance_cents ?? 0), 0),
-    totalPortfolioCents: clients.reduce((total, client) => total + (client.balance?.total_balance_cents ?? 0), 0),
+    capitalLentCents: activePortfolioCents,
+    pendingInterestCents,
+    totalPortfolioCents,
     activeClientCount: activeClients.length,
     lateClientCount: lateClients.length,
+    capitalContributedCents: financial.capitalContributedCents,
+    capitalWithdrawnCents: financial.capitalWithdrawnCents,
+    netContributedCapitalCents: financial.netContributedCapitalCents,
+    availableCashCents: financial.availableCashCents,
+    interestGeneratedCents: financial.interestGeneratedCents,
+    interestCollectedCents: financial.interestCollectedCents,
+    netProfitCents: financial.netProfitCents,
+    retainedEquityCents: financial.retainedEquityCents,
+    cycleLoanVolumeCents: financial.cycleLoanVolumeCents,
+    historicalLoanVolumeCents: financial.historicalLoanVolumeCents,
+    cyclePrincipalRecoveredCents: financial.cyclePrincipalRecoveredCents,
+    loanCount: financial.loanCount,
+    paidLoanCount: financial.paidLoanCount,
+    recoveryRate: financial.recoveryRate,
+    capitalRotation: financial.capitalRotation,
+    cycleCapitalRotation: financial.cycleCapitalRotation,
     cyclePaymentStartDate: cyclePayments.startDate,
     cyclePaymentEndDate: cyclePayments.endDate,
     cyclePaymentsCents: cyclePayments.totalPaymentsCents,
     cycleInterestCollectedCents: cyclePayments.interestCollectedCents,
-    cyclePrincipalRecoveredCents: cyclePayments.principalRecoveredCents,
     nextCloseDate: getNextCloseDate(),
   };
 }

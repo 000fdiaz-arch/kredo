@@ -7,6 +7,14 @@ import { StatusBadge } from "@/components/ui/StatusBadge";
 import { formatMoney } from "@/lib/money";
 import { getDashboardSummary } from "@/services/dashboard.service";
 
+function formatRatio(value: number) {
+  return `${value.toFixed(2)}x`;
+}
+
+function formatPercent(value: number) {
+  return `${Math.round(value * 100)}%`;
+}
+
 export function DashboardPage() {
   const { data, isLoading, error } = useQuery({
     queryKey: ["dashboard-summary"],
@@ -17,12 +25,54 @@ export function DashboardPage() {
     <section>
       <PageHeader
         eyebrow="Dashboard"
-        title="Resumen de cartera"
-        description="Saldos calculados desde Supabase."
+        title="Resumen financiero"
+        description="Capital, caja, cartera y ganancia separados por naturaleza."
       />
 
       <div className="mb-4 grid grid-cols-2 gap-3">
-        <MetricCard label="Capital prestado" value={formatMoney(data?.capitalLentCents ?? 0)} />
+        <MetricCard
+          label="Capital propio aportado"
+          value={formatMoney(data?.capitalContributedCents ?? 0)}
+          helper="Dinero nuevo colocado por el propietario."
+        />
+        <MetricCard
+          label="Dinero actualmente prestado"
+          value={formatMoney(data?.capitalLentCents ?? 0)}
+          helper="Cartera activa: capital pendiente de cobrar."
+        />
+        <MetricCard
+          label="Dinero disponible"
+          value={formatMoney(data?.availableCashCents ?? 0)}
+          helper="Caja no prestada, calculada desde movimientos."
+          tone="green"
+        />
+        <MetricCard
+          label="Intereses cobrados"
+          value={formatMoney(data?.interestCollectedCents ?? 0)}
+          helper="Ingresos financieros recibidos en efectivo."
+          tone="yellow"
+        />
+        <MetricCard
+          label="Ganancia neta"
+          value={formatMoney(data?.netProfitCents ?? 0)}
+          helper="Intereses y otros ingresos menos gastos y perdidas."
+          tone={(data?.netProfitCents ?? 0) < 0 ? "red" : "green"}
+        />
+        <MetricCard
+          label="Total desembolsado ciclo"
+          value={formatMoney(data?.cycleLoanVolumeCents ?? 0)}
+          helper="Volumen prestado, incluyendo dinero reutilizado."
+        />
+        <MetricCard
+          label="Rotacion del capital"
+          value={formatRatio(data?.cycleCapitalRotation ?? 0)}
+          helper="Veces que el capital neto aportado roto en este ciclo."
+        />
+        <MetricCard
+          label="Interes generado"
+          value={formatMoney(data?.interestGeneratedCents ?? 0)}
+          helper="Interes causado, aunque no se haya cobrado."
+        />
         <MetricCard label="Interes pendiente" value={formatMoney(data?.pendingInterestCents ?? 0)} tone="yellow" />
         <MetricCard label="Total cartera" value={formatMoney(data?.totalPortfolioCents ?? 0)} />
         <MetricCard label="Clientes activos" value={`${data?.activeClientCount ?? 0}`} helper={`${data?.lateClientCount ?? 0} con atraso`} />
@@ -35,12 +85,17 @@ export function DashboardPage() {
             value={formatMoney(data?.cyclePaymentsCents ?? 0)}
             helper={
               data
-                ? `Ciclo ${data.cyclePaymentStartDate} al ${data.cyclePaymentEndDate} · Capital ${formatMoney(data.cyclePrincipalRecoveredCents)} · Interes ${formatMoney(data.cycleInterestCollectedCents)} · Toca para revisar`
+                ? `Ciclo ${data.cyclePaymentStartDate} al ${data.cyclePaymentEndDate} - Capital ${formatMoney(data.cyclePrincipalRecoveredCents)} - Interes ${formatMoney(data.cycleInterestCollectedCents)} - Toca para revisar`
                 : "Cargando ciclo actual"
             }
             tone="green"
           />
         </Link>
+        <MetricCard
+          label="Control historico"
+          value={formatMoney(data?.historicalLoanVolumeCents ?? 0)}
+          helper={`Prestamos ${data?.loanCount ?? 0} - Recuperacion ${formatPercent(data?.recoveryRate ?? 0)} - Retiros ${formatMoney(data?.capitalWithdrawnCents ?? 0)}`}
+        />
         <MetricCard
           label="Proximo cierre"
           value={data?.nextCloseDate ?? "Cargando"}
@@ -72,7 +127,7 @@ export function DashboardPage() {
 
       {error ? (
         <article className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm font-medium text-kredo-red">
-          No se pudieron cargar los datos. Revisa que la migracion inicial este aplicada en Supabase.
+          No se pudieron cargar los datos. Revisa que la migracion de movimientos financieros este aplicada en Supabase.
         </article>
       ) : null}
 
