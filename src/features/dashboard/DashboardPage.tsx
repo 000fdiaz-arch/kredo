@@ -17,8 +17,11 @@ function formatPercent(value: number) {
   return `${Math.round(value * 100)}%`;
 }
 
+type SummaryTab = "operation" | "capital" | "profit" | "activity";
+
 export function DashboardPage() {
   const [searchTerm, setSearchTerm] = useState("");
+  const [activeSummaryTab, setActiveSummaryTab] = useState<SummaryTab>("operation");
   const { data, isLoading, error } = useQuery({
     queryKey: ["dashboard-summary"],
     queryFn: getDashboardSummary,
@@ -37,6 +40,12 @@ export function DashboardPage() {
     ));
   }, [data?.clients, normalizedSearchTerm]);
   const lendingGuidance = calculateLendingLimitGuidance(data?.availableCashCents ?? 0, 0);
+  const summaryTabs: Array<{ id: SummaryTab; label: string }> = [
+    { id: "operation", label: "Operacion" },
+    { id: "capital", label: "Capital" },
+    { id: "profit", label: "Ganancia" },
+    { id: "activity", label: "Actividad" },
+  ];
 
   return (
     <section>
@@ -46,84 +55,128 @@ export function DashboardPage() {
         description="Capital, caja, cartera y ganancia separados por naturaleza."
       />
 
-      <div className="mb-4 grid grid-cols-2 gap-3">
-        <MetricCard
-          label="Capital propio aportado"
-          value={formatMoney(data?.capitalContributedCents ?? 0)}
-          helper="Dinero nuevo colocado por el propietario."
-        />
-        <MetricCard
-          label="Dinero actualmente prestado"
-          value={formatMoney(data?.capitalLentCents ?? 0)}
-          helper="Cartera activa: capital pendiente de cobrar."
-        />
-        <MetricCard
-          label="Dinero disponible"
-          value={formatMoney(data?.availableCashCents ?? 0)}
-          helper="Caja no prestada, calculada desde movimientos."
-          tone="green"
-        />
-        <MetricCard
-          label="Limite por persona"
-          value={formatMoney(lendingGuidance.recommendedLimitCents)}
-          helper={`Normal ${formatMoney(lendingGuidance.normalLimitCents)} - Excepcion ${formatMoney(lendingGuidance.exceptionalLimitCents)}`}
-          tone="yellow"
-        />
-        <MetricCard
-          label="Intereses cobrados"
-          value={formatMoney(data?.interestCollectedCents ?? 0)}
-          helper="Ingresos financieros recibidos en efectivo."
-          tone="yellow"
-        />
-        <MetricCard
-          label="Ganancia neta"
-          value={formatMoney(data?.netProfitCents ?? 0)}
-          helper="Intereses y otros ingresos menos gastos y perdidas."
-          tone={(data?.netProfitCents ?? 0) < 0 ? "red" : "green"}
-        />
-        <MetricCard
-          label="Total desembolsado ciclo"
-          value={formatMoney(data?.cycleLoanVolumeCents ?? 0)}
-          helper="Volumen prestado, incluyendo dinero reutilizado."
-        />
-        <MetricCard
-          label="Rotacion del capital"
-          value={formatRatio(data?.cycleCapitalRotation ?? 0)}
-          helper="Veces que el capital neto aportado roto en este ciclo."
-        />
-        <MetricCard
-          label="Interes generado"
-          value={formatMoney(data?.interestGeneratedCents ?? 0)}
-          helper="Interes causado, aunque no se haya cobrado."
-        />
-        <MetricCard label="Interes pendiente" value={formatMoney(data?.pendingInterestCents ?? 0)} tone="yellow" />
-        <MetricCard label="Total cartera" value={formatMoney(data?.totalPortfolioCents ?? 0)} />
-        <MetricCard label="Clientes activos" value={`${data?.activeClientCount ?? 0}`} helper={`${data?.lateClientCount ?? 0} con atraso`} />
-      </div>
+      <div className="mb-4">
+        <div className="grid grid-cols-4 rounded-lg border border-kredo-line bg-white p-1">
+          {summaryTabs.map((tab) => (
+            <button
+              className={`min-h-10 rounded-md px-2 text-xs font-semibold ${
+                activeSummaryTab === tab.id ? "bg-kredo-primary text-white" : "text-kredo-muted"
+              }`}
+              key={tab.id}
+              onClick={() => setActiveSummaryTab(tab.id)}
+              type="button"
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
 
-      <div className="mb-4 grid grid-cols-1 gap-3">
-        <Link className="block" to="/cycles/payments">
-          <MetricCard
-            label="Pagos del ciclo"
-            value={formatMoney(data?.cyclePaymentsCents ?? 0)}
-            helper={
-              data
-                ? `Ciclo ${data.cyclePaymentStartDate} al ${data.cyclePaymentEndDate} - Capital ${formatMoney(data.cyclePrincipalRecoveredCents)} - Interes ${formatMoney(data.cycleInterestCollectedCents)} - Toca para revisar`
-                : "Cargando ciclo actual"
-            }
-            tone="green"
-          />
-        </Link>
-        <MetricCard
-          label="Control historico"
-          value={formatMoney(data?.historicalLoanVolumeCents ?? 0)}
-          helper={`Prestamos ${data?.loanCount ?? 0} - Recuperacion ${formatPercent(data?.recoveryRate ?? 0)} - Retiros ${formatMoney(data?.capitalWithdrawnCents ?? 0)}`}
-        />
-        <MetricCard
-          label="Proximo cierre"
-          value={data?.nextCloseDate ?? "Cargando"}
-          helper={data ? `Ciclo ${data.cyclePaymentStartDate} al ${data.cyclePaymentEndDate}` : "Cargando ciclo actual"}
-        />
+        <div className="mt-3 grid grid-cols-2 gap-3">
+          {activeSummaryTab === "operation" ? (
+            <>
+              <MetricCard
+                label="Dinero disponible"
+                value={formatMoney(data?.availableCashCents ?? 0)}
+                helper="Caja no prestada, calculada desde movimientos."
+                tone="green"
+              />
+              <MetricCard
+                label="Limite por persona"
+                value={formatMoney(lendingGuidance.recommendedLimitCents)}
+                helper={`Normal ${formatMoney(lendingGuidance.normalLimitCents)} - Excepcion ${formatMoney(lendingGuidance.exceptionalLimitCents)}`}
+                tone="yellow"
+              />
+              <MetricCard
+                label="Dinero actualmente prestado"
+                value={formatMoney(data?.capitalLentCents ?? 0)}
+                helper="Cartera activa: capital pendiente de cobrar."
+              />
+              <MetricCard label="Clientes activos" value={`${data?.activeClientCount ?? 0}`} helper={`${data?.lateClientCount ?? 0} con atraso`} />
+              <MetricCard
+                label="Proximo cierre"
+                value={data?.nextCloseDate ?? "Cargando"}
+                helper={data ? `Ciclo ${data.cyclePaymentStartDate} al ${data.cyclePaymentEndDate}` : "Cargando ciclo actual"}
+              />
+            </>
+          ) : null}
+
+          {activeSummaryTab === "capital" ? (
+            <>
+              <MetricCard
+                label="Capital propio aportado"
+                value={formatMoney(data?.capitalContributedCents ?? 0)}
+                helper="Dinero nuevo colocado por el propietario."
+              />
+              <MetricCard label="Capital retirado" value={formatMoney(data?.capitalWithdrawnCents ?? 0)} helper="Retiros hechos por el propietario." />
+              <MetricCard
+                label="Dinero actualmente prestado"
+                value={formatMoney(data?.capitalLentCents ?? 0)}
+                helper="Cartera activa: capital pendiente de cobrar."
+              />
+              <MetricCard label="Total cartera" value={formatMoney(data?.totalPortfolioCents ?? 0)} />
+              <MetricCard
+                label="Rotacion del capital"
+                value={formatRatio(data?.cycleCapitalRotation ?? 0)}
+                helper="Veces que el capital neto aportado roto en este ciclo."
+              />
+            </>
+          ) : null}
+
+          {activeSummaryTab === "profit" ? (
+            <>
+              <MetricCard
+                label="Intereses cobrados"
+                value={formatMoney(data?.interestCollectedCents ?? 0)}
+                helper="Ingresos financieros recibidos en efectivo."
+                tone="yellow"
+              />
+              <MetricCard
+                label="Ganancia neta"
+                value={formatMoney(data?.netProfitCents ?? 0)}
+                helper="Intereses y otros ingresos menos gastos y perdidas."
+                tone={(data?.netProfitCents ?? 0) < 0 ? "red" : "green"}
+              />
+              <MetricCard
+                label="Interes generado"
+                value={formatMoney(data?.interestGeneratedCents ?? 0)}
+                helper="Interes causado, aunque no se haya cobrado."
+              />
+              <MetricCard label="Interes pendiente" value={formatMoney(data?.pendingInterestCents ?? 0)} tone="yellow" />
+            </>
+          ) : null}
+
+          {activeSummaryTab === "activity" ? (
+            <>
+              <Link className="block" to="/cycles/payments">
+                <MetricCard
+                  label="Pagos del ciclo"
+                  value={formatMoney(data?.cyclePaymentsCents ?? 0)}
+                  helper={
+                    data
+                      ? `Ciclo ${data.cyclePaymentStartDate} al ${data.cyclePaymentEndDate} - Toca para revisar`
+                      : "Cargando ciclo actual"
+                  }
+                  tone="green"
+                />
+              </Link>
+              <MetricCard
+                label="Capital recuperado ciclo"
+                value={formatMoney(data?.cyclePrincipalRecoveredCents ?? 0)}
+                helper={`Interes cobrado ${formatMoney(data?.cycleInterestCollectedCents ?? 0)}`}
+              />
+              <MetricCard
+                label="Total desembolsado ciclo"
+                value={formatMoney(data?.cycleLoanVolumeCents ?? 0)}
+                helper="Volumen prestado, incluyendo dinero reutilizado."
+              />
+              <MetricCard
+                label="Control historico"
+                value={formatMoney(data?.historicalLoanVolumeCents ?? 0)}
+                helper={`Prestamos ${data?.loanCount ?? 0} - Recuperacion ${formatPercent(data?.recoveryRate ?? 0)}`}
+              />
+            </>
+          ) : null}
+        </div>
       </div>
 
       <div className="mb-4 flex gap-2">
