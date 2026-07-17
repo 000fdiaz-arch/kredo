@@ -29,8 +29,17 @@ export function DashboardPage() {
       </div>
 
       <div className="mb-4 grid grid-cols-1 gap-3">
-        <MetricCard label="Pagos del ciclo" value={formatMoney(0)} helper="Capital recuperado e intereses cobrados" />
-        <MetricCard label="Proximo cierre" value="Dia 15" helper="Luego ultimo dia del mes" />
+        <MetricCard
+          label="Pagos del ciclo"
+          value={formatMoney(data?.cyclePaymentsCents ?? 0)}
+          helper={`Capital ${formatMoney(data?.cyclePrincipalRecoveredCents ?? 0)} · Interes ${formatMoney(data?.cycleInterestCollectedCents ?? 0)}`}
+          tone="green"
+        />
+        <MetricCard
+          label="Proximo cierre"
+          value={data?.nextCloseDate ?? "Cargando"}
+          helper={data ? `Ciclo ${data.cyclePaymentStartDate} al ${data.cyclePaymentEndDate}` : "Cargando ciclo actual"}
+        />
       </div>
 
       <div className="mb-4 flex gap-2">
