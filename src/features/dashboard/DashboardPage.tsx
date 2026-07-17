@@ -7,6 +7,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { formatMoney } from "@/lib/money";
 import { getDashboardSummary } from "@/services/dashboard.service";
+import { calculateLendingLimitGuidance } from "@/services/lending-limits";
 
 function formatRatio(value: number) {
   return `${value.toFixed(2)}x`;
@@ -35,6 +36,7 @@ export function DashboardPage() {
       (client.phone ?? "").toLowerCase().includes(normalizedSearchTerm)
     ));
   }, [data?.clients, normalizedSearchTerm]);
+  const lendingGuidance = calculateLendingLimitGuidance(data?.availableCashCents ?? 0, 0);
 
   return (
     <section>
@@ -60,6 +62,12 @@ export function DashboardPage() {
           value={formatMoney(data?.availableCashCents ?? 0)}
           helper="Caja no prestada, calculada desde movimientos."
           tone="green"
+        />
+        <MetricCard
+          label="Limite por persona"
+          value={formatMoney(lendingGuidance.recommendedLimitCents)}
+          helper={`Normal ${formatMoney(lendingGuidance.normalLimitCents)} - Excepcion ${formatMoney(lendingGuidance.exceptionalLimitCents)}`}
+          tone="yellow"
         />
         <MetricCard
           label="Intereses cobrados"
