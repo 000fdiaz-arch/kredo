@@ -40,7 +40,7 @@ export function LoanFormPage() {
       await queryClient.invalidateQueries({ queryKey: ["clients"] });
       await queryClient.invalidateQueries({ queryKey: ["dashboard-summary"] });
       await queryClient.invalidateQueries({ queryKey: ["client", loan.client_id] });
-      navigate(`/clients/${loan.client_id}`);
+      navigate(`/receipts/loan/${loan.id}`);
     },
     onError: () => {
       setFormError("No se pudo registrar el prestamo. Revisa la conexion y que la migracion este aplicada.");

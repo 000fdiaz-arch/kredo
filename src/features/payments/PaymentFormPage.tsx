@@ -111,7 +111,7 @@ export function PaymentFormPage() {
         queryClient.invalidateQueries({ queryKey: ["client-movements", payment.client_id] }),
         queryClient.invalidateQueries({ queryKey: ["dashboard-summary"] }),
       ]);
-      navigate(`/clients/${payment.client_id}`);
+      navigate(`/receipts/payment/${payment.id}`);
     },
     onError: () => {
       setFormError("No se pudo registrar el pago. Revisa la conexion e intenta otra vez.");

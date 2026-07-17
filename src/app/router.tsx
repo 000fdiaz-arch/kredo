@@ -13,6 +13,7 @@ import { CyclePaymentsPage } from "@/features/cycles/CyclePaymentsPage";
 import { HistoryPage } from "@/features/history/HistoryPage";
 import { ReportsPage } from "@/features/reports/ReportsPage";
 import { SettingsPage } from "@/features/settings/SettingsPage";
+import { ReceiptPage } from "@/features/receipts/ReceiptPage";
 import { NotFoundPage } from "@/components/layout/NotFoundPage";
 
 export const router = createBrowserRouter([
@@ -39,6 +40,7 @@ export const router = createBrowserRouter([
           { path: "/history", element: <HistoryPage /> },
           { path: "/reports", element: <ReportsPage /> },
           { path: "/settings", element: <SettingsPage /> },
+          { path: "/receipts/:receiptType/:receiptId", element: <ReceiptPage /> },
         ],
       },
     ],
