@@ -2,7 +2,7 @@ import { Link, useParams } from "react-router-dom";
 import { Download, Printer, Share2 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import html2canvas from "html2canvas";
-import { useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { formatMoney } from "@/lib/money";
 import { toDateInputValue } from "@/lib/dates";
@@ -51,6 +51,7 @@ function downloadBlob(blob: Blob, fileName: string) {
 export function ClientStatementPage() {
   const { clientId = "" } = useParams();
   const statementRef = useRef<HTMLElement | null>(null);
+  const preparedImageRef = useRef<{ blob: Blob; file: File; fileName: string } | null>(null);
   const [shareError, setShareError] = useState("");
   const [isPreparingImage, setIsPreparingImage] = useState(false);
   const { data, isLoading, error } = useQuery({
@@ -58,22 +59,10 @@ export function ClientStatementPage() {
     queryFn: () => getClientStatement(clientId),
     enabled: Boolean(clientId),
   });
+  const clientName = data?.client?.full_name ?? "cliente";
+  const imageFileName = `estado-${clientName.toLowerCase().replace(/[^a-z0-9]+/g, "-") || "cliente"}.png`;
 
-  if (isLoading) {
-    return <article className="rounded-lg border border-kredo-line bg-white p-4 text-sm text-kredo-muted">Cargando estado de cuenta...</article>;
-  }
-
-  if (error || !data?.client) {
-    return <article className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm font-medium text-kredo-red">No se pudo cargar el estado de cuenta.</article>;
-  }
-
-  const { client, latestPayment } = data;
-  const principalBalanceCents = client.balance?.principal_balance_cents ?? 0;
-  const interestBalanceCents = client.balance?.interest_balance_cents ?? 0;
-  const totalBalanceCents = client.balance?.total_balance_cents ?? 0;
-  const imageFileName = `estado-${client.full_name.toLowerCase().replace(/[^a-z0-9]+/g, "-") || "cliente"}.png`;
-
-  async function createStatementImage() {
+  const createStatementImage = useCallback(async () => {
     if (!statementRef.current) {
       throw new Error("Statement is not ready");
     }
@@ -94,15 +83,65 @@ export function ClientStatementPage() {
         resolve(blob);
       }, "image/png");
     });
+  }, []);
+
+  const prepareStatementImage = useCallback(async () => {
+    const blob = await createStatementImage();
+    const file = new File([blob], imageFileName, { type: "image/png" });
+    preparedImageRef.current = { blob, file, fileName: imageFileName };
+
+    return preparedImageRef.current;
+  }, [createStatementImage, imageFileName]);
+
+  useEffect(() => {
+    if (!data?.client) {
+      return;
+    }
+
+    let cancelled = false;
+    preparedImageRef.current = null;
+    setShareError("");
+    setIsPreparingImage(true);
+
+    window.requestAnimationFrame(() => {
+      prepareStatementImage()
+        .catch(() => {
+          if (!cancelled) {
+            setShareError("No se pudo preparar la imagen. Usa el boton Imagen para generarla manualmente.");
+          }
+        })
+        .finally(() => {
+          if (!cancelled) {
+            setIsPreparingImage(false);
+          }
+        });
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [data?.client, prepareStatementImage]);
+
+  if (isLoading) {
+    return <article className="rounded-lg border border-kredo-line bg-white p-4 text-sm text-kredo-muted">Cargando estado de cuenta...</article>;
   }
+
+  if (error || !data?.client) {
+    return <article className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm font-medium text-kredo-red">No se pudo cargar el estado de cuenta.</article>;
+  }
+
+  const { client, latestPayment } = data;
+  const principalBalanceCents = client.balance?.principal_balance_cents ?? 0;
+  const interestBalanceCents = client.balance?.interest_balance_cents ?? 0;
+  const totalBalanceCents = client.balance?.total_balance_cents ?? 0;
 
   async function handleDownloadImage() {
     setShareError("");
     setIsPreparingImage(true);
 
     try {
-      const blob = await createStatementImage();
-      downloadBlob(blob, imageFileName);
+      const image = preparedImageRef.current ?? (await prepareStatementImage());
+      downloadBlob(image.blob, image.fileName);
     } catch (downloadError) {
       setShareError(`No se pudo generar o descargar la imagen. Motivo: ${getErrorDetail(downloadError)}`);
     } finally {
@@ -112,8 +151,6 @@ export function ClientStatementPage() {
 
   async function handleShareImage() {
     setShareError("");
-    setIsPreparingImage(true);
-    let blob: Blob | null = null;
 
     try {
       if (!window.isSecureContext) {
@@ -126,11 +163,15 @@ export function ClientStatementPage() {
         return;
       }
 
-      blob = await createStatementImage();
-      const file = new File([blob], imageFileName, { type: "image/png" });
+      const image = preparedImageRef.current;
 
-      if (!navigator.canShare?.({ files: [file] })) {
-        downloadBlob(blob, imageFileName);
+      if (!image) {
+        setShareError("La imagen todavia se esta preparando. Intenta compartir de nuevo en un momento.");
+        return;
+      }
+
+      if (!navigator.canShare?.({ files: [image.file] })) {
+        downloadBlob(image.blob, image.fileName);
         setShareError("El navegador abre compartir, pero no acepta imagenes generadas por la web. Descarga la imagen y enviala por WhatsApp.");
         return;
       }
@@ -138,7 +179,7 @@ export function ClientStatementPage() {
       await navigator.share({
         title: "Estado de cuenta",
         text: `Estado de cuenta de ${client.full_name}`,
-        files: [file],
+        files: [image.file],
       });
     } catch (shareError) {
       if (isShareCancelled(shareError)) {
@@ -146,15 +187,13 @@ export function ClientStatementPage() {
         return;
       }
 
-      if (blob) {
-        downloadBlob(blob, imageFileName);
+      if (preparedImageRef.current) {
+        downloadBlob(preparedImageRef.current.blob, preparedImageRef.current.fileName);
         setShareError("El navegador bloqueo compartir directo. Descargue la imagen y enviela por WhatsApp.");
         return;
       }
 
-      setShareError(`No se pudo generar la imagen. Motivo: ${getErrorDetail(shareError)}`);
-    } finally {
-      setIsPreparingImage(false);
+      setShareError(`No se pudo compartir la imagen. Motivo: ${getErrorDetail(shareError)}`);
     }
   }
 
