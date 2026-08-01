@@ -33,6 +33,10 @@ function getErrorDetail(error: unknown) {
   return "El navegador no entrego un detalle tecnico.";
 }
 
+function isShareCancelled(error: unknown) {
+  return error instanceof DOMException && error.name === "AbortError";
+}
+
 function downloadBlob(blob: Blob, fileName: string) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
@@ -109,6 +113,7 @@ export function ClientStatementPage() {
   async function handleShareImage() {
     setShareError("");
     setIsPreparingImage(true);
+    let blob: Blob | null = null;
 
     try {
       if (!window.isSecureContext) {
@@ -121,7 +126,7 @@ export function ClientStatementPage() {
         return;
       }
 
-      const blob = await createStatementImage();
+      blob = await createStatementImage();
       const file = new File([blob], imageFileName, { type: "image/png" });
 
       if (!navigator.canShare?.({ files: [file] })) {
@@ -136,7 +141,18 @@ export function ClientStatementPage() {
         files: [file],
       });
     } catch (shareError) {
-      setShareError(`No se pudo compartir la imagen. Motivo: ${getErrorDetail(shareError)}`);
+      if (isShareCancelled(shareError)) {
+        setShareError("El envio fue cancelado desde el menu de compartir.");
+        return;
+      }
+
+      if (blob) {
+        downloadBlob(blob, imageFileName);
+        setShareError("El navegador bloqueo compartir directo. Descargue la imagen y enviela por WhatsApp.");
+        return;
+      }
+
+      setShareError(`No se pudo generar la imagen. Motivo: ${getErrorDetail(shareError)}`);
     } finally {
       setIsPreparingImage(false);
     }

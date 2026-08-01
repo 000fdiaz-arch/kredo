@@ -4,6 +4,7 @@ import { getOrCreateCycle } from "@/services/cycles.service";
 import type { Database } from "@/types/database";
 
 type LoanRow = Database["public"]["Tables"]["loans"]["Row"];
+type PaymentRow = Database["public"]["Tables"]["payments"]["Row"];
 type InterestChargeRow = Database["public"]["Tables"]["interest_charges"]["Row"];
 
 export type InterestCyclePreview = {
@@ -19,16 +20,31 @@ export type ClientInterestStatus = {
   nextCloseDate: string;
 };
 
-function calculateCycleInterest(loans: LoanRow[], endDate: string) {
-  const eligibleLoans = loans.filter((loan) => loan.loan_date <= endDate && !loan.voided_at);
-  const principalBaseCents = eligibleLoans.reduce((total, loan) => total + loan.principal_amount_cents, 0);
-  const interestAmountCents = eligibleLoans.reduce(
-    (total, loan) => total + Math.round((loan.principal_amount_cents * loan.interest_rate_bps) / 10000),
+export function calculateCycleInterest(loans: LoanRow[], payments: PaymentRow[], endDate: string) {
+  const eligibleLoans = loans
+    .filter((loan) => loan.loan_date <= endDate && !loan.voided_at)
+    .sort((a, b) => a.loan_date.localeCompare(b.loan_date) || a.created_at.localeCompare(b.created_at));
+  let principalPaidCents = payments
+    .filter((payment) => payment.payment_date <= endDate && !payment.voided_at)
+    .reduce((total, payment) => total + payment.principal_amount_cents, 0);
+
+  const outstandingLoans = eligibleLoans.map((loan) => {
+    const principalAppliedCents = Math.min(loan.principal_amount_cents, principalPaidCents);
+    principalPaidCents -= principalAppliedCents;
+
+    return {
+      principalAmountCents: loan.principal_amount_cents - principalAppliedCents,
+      interestRateBps: loan.interest_rate_bps,
+    };
+  });
+  const principalBaseCents = outstandingLoans.reduce((total, loan) => total + loan.principalAmountCents, 0);
+  const interestAmountCents = outstandingLoans.reduce(
+    (total, loan) => total + Math.round((loan.principalAmountCents * loan.interestRateBps) / 10000),
     0,
   );
   const weightedRateBps = principalBaseCents
     ? Math.round(
-        eligibleLoans.reduce((total, loan) => total + loan.principal_amount_cents * loan.interest_rate_bps, 0) /
+        outstandingLoans.reduce((total, loan) => total + loan.principalAmountCents * loan.interestRateBps, 0) /
           principalBaseCents,
       )
     : 0;
@@ -55,6 +71,21 @@ async function listClientLoans(clientId: string) {
   return data ?? [];
 }
 
+async function listClientPayments(clientId: string) {
+  const { data, error } = await supabase
+    .from("payments")
+    .select("*")
+    .eq("client_id", clientId)
+    .is("voided_at", null)
+    .order("payment_date", { ascending: true });
+
+  if (error) {
+    throw error;
+  }
+
+  return data ?? [];
+}
+
 async function listClientInterestCharges(clientId: string) {
   const { data, error } = await supabase
     .from("interest_charges")
@@ -71,7 +102,11 @@ async function listClientInterestCharges(clientId: string) {
 
 export async function getClientInterestStatus(clientId: string): Promise<ClientInterestStatus> {
   const asOfDate = toDateInputValue();
-  const [loans, charges] = await Promise.all([listClientLoans(clientId), listClientInterestCharges(clientId)]);
+  const [loans, payments, charges] = await Promise.all([
+    listClientLoans(clientId),
+    listClientPayments(clientId),
+    listClientInterestCharges(clientId),
+  ]);
   const firstLoan = loans[0];
 
   if (!firstLoan) {
@@ -94,7 +129,7 @@ export async function getClientInterestStatus(clientId: string): Promise<ClientI
 
   const dueCycles = cycles
     .map(({ range, cycle }) => {
-      const interest = calculateCycleInterest(loans, range.endDate);
+      const interest = calculateCycleInterest(loans, payments, range.endDate);
 
       return {
         endDate: range.endDate,
@@ -116,7 +151,7 @@ export async function getClientInterestStatus(clientId: string): Promise<ClientI
 
 export async function generateDueInterestForClient(clientId: string): Promise<InterestChargeRow[]> {
   const asOfDate = toDateInputValue();
-  const loans = await listClientLoans(clientId);
+  const [loans, payments] = await Promise.all([listClientLoans(clientId), listClientPayments(clientId)]);
   const firstLoan = loans[0];
 
   if (!firstLoan) {
@@ -144,7 +179,7 @@ export async function generateDueInterestForClient(clientId: string): Promise<In
       continue;
     }
 
-    const interest = calculateCycleInterest(loans, range.endDate);
+    const interest = calculateCycleInterest(loans, payments, range.endDate);
 
     if (interest.principalBaseCents <= 0 || interest.interestAmountCents <= 0) {
       continue;
