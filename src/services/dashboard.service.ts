@@ -2,6 +2,7 @@ import { listClientsWithBalances } from "@/services/clients.service";
 import { getNextCloseDate } from "@/lib/dates";
 import { getCurrentCyclePaymentBreakdown } from "@/services/cycle-payments.service";
 import { getFinancialIndicators } from "@/services/financial-movements.service";
+import { generateDueInterestForAllClients } from "@/services/interest.service";
 import type { ClientWithBalance } from "@/services/clients.service";
 
 const statusPriority = {
@@ -40,6 +41,8 @@ function sortClientsByUrgency(clients: ClientWithBalance[]) {
 }
 
 export async function getDashboardSummary() {
+  await generateDueInterestForAllClients();
+
   const [clients, cyclePayments] = await Promise.all([
     listClientsWithBalances(),
     getCurrentCyclePaymentBreakdown(),

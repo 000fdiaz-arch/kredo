@@ -7,6 +7,12 @@ type LoanRow = Database["public"]["Tables"]["loans"]["Row"];
 type PaymentRow = Database["public"]["Tables"]["payments"]["Row"];
 type InterestChargeRow = Database["public"]["Tables"]["interest_charges"]["Row"];
 
+export type InterestLoan = Pick<
+  LoanRow,
+  "loan_date" | "principal_amount_cents" | "interest_rate_bps" | "created_at" | "voided_at"
+>;
+export type InterestPayment = Pick<PaymentRow, "payment_date" | "principal_amount_cents" | "voided_at">;
+
 export type InterestCyclePreview = {
   endDate: string;
   principalBaseCents: number;
@@ -20,7 +26,7 @@ export type ClientInterestStatus = {
   nextCloseDate: string;
 };
 
-export function calculateCycleInterest(loans: LoanRow[], payments: PaymentRow[], endDate: string) {
+export function calculateCycleInterest(loans: InterestLoan[], payments: InterestPayment[], endDate: string) {
   const eligibleLoans = loans
     .filter((loan) => loan.loan_date <= endDate && !loan.voided_at)
     .sort((a, b) => a.loan_date.localeCompare(b.loan_date) || a.created_at.localeCompare(b.created_at));
@@ -100,8 +106,20 @@ async function listClientInterestCharges(clientId: string) {
   return data ?? [];
 }
 
-export async function getClientInterestStatus(clientId: string): Promise<ClientInterestStatus> {
-  const asOfDate = toDateInputValue();
+async function listClientIdsWithLoans() {
+  const { data, error } = await supabase
+    .from("loans")
+    .select("client_id")
+    .is("voided_at", null);
+
+  if (error) {
+    throw error;
+  }
+
+  return [...new Set((data ?? []).map((loan) => loan.client_id))];
+}
+
+export async function getClientInterestStatus(clientId: string, asOfDate = toDateInputValue()): Promise<ClientInterestStatus> {
   const [loans, payments, charges] = await Promise.all([
     listClientLoans(clientId),
     listClientPayments(clientId),
@@ -149,8 +167,7 @@ export async function getClientInterestStatus(clientId: string): Promise<ClientI
   };
 }
 
-export async function generateDueInterestForClient(clientId: string): Promise<InterestChargeRow[]> {
-  const asOfDate = toDateInputValue();
+export async function generateDueInterestForClient(clientId: string, asOfDate = toDateInputValue()): Promise<InterestChargeRow[]> {
   const [loans, payments] = await Promise.all([listClientLoans(clientId), listClientPayments(clientId)]);
   const firstLoan = loans[0];
 
@@ -206,4 +223,11 @@ export async function generateDueInterestForClient(clientId: string): Promise<In
   }
 
   return created;
+}
+
+export async function generateDueInterestForAllClients(): Promise<InterestChargeRow[]> {
+  const clientIds = await listClientIdsWithLoans();
+  const generated = await Promise.all(clientIds.map((clientId) => generateDueInterestForClient(clientId)));
+
+  return generated.flat();
 }

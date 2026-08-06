@@ -1,5 +1,6 @@
 import { supabase } from "@/lib/supabase";
-import { toDateInputValue } from "@/lib/dates";
+import { listDueCycleRanges, toDateInputValue } from "@/lib/dates";
+import { calculateCycleInterest, type InterestLoan, type InterestPayment } from "@/services/interest.service";
 import type { Database } from "@/types/database";
 import type { ClientStatus } from "@/types/domain";
 
@@ -51,10 +52,17 @@ type CycleStatusRow = Pick<Database["public"]["Tables"]["cycles"]["Row"], "id" |
 
 type PaymentInterestStatusRow = {
   client_id: string;
+  payment_date: string;
   interest_amount_cents: number;
+  principal_amount_cents: number;
+  voided_at: string | null;
 };
 
 type ZeroInterestLoanStatusRow = Pick<Database["public"]["Tables"]["loans"]["Row"], "client_id">;
+type LoanInterestStatusRow = Pick<
+  Database["public"]["Tables"]["loans"]["Row"],
+  "client_id" | "loan_date" | "principal_amount_cents" | "interest_rate_bps" | "created_at" | "voided_at"
+>;
 
 function calculateDisplayStatus(client: ClientWithBalance, lateInterestCents: number, hasZeroInterestLoan: boolean): ClientStatus {
   if (client.status === "inactive") {
@@ -89,7 +97,11 @@ async function getLateInterestByClient(clientIds: string[]) {
     return new Map<string, number>();
   }
 
-  const [{ data: charges, error: chargesError }, { data: payments, error: paymentsError }] = await Promise.all([
+  const [
+    { data: charges, error: chargesError },
+    { data: payments, error: paymentsError },
+    { data: loans, error: loansError },
+  ] = await Promise.all([
     supabase
       .from("interest_charges")
       .select("client_id, cycle_id, interest_amount_cents")
@@ -97,9 +109,15 @@ async function getLateInterestByClient(clientIds: string[]) {
       .is("voided_at", null),
     (supabase as any)
       .from("payments")
-      .select("client_id, interest_amount_cents")
+      .select("client_id, payment_date, interest_amount_cents, principal_amount_cents, voided_at")
       .in("client_id", clientIds)
       .is("voided_at", null),
+    supabase
+      .from("loans")
+      .select("client_id, loan_date, principal_amount_cents, interest_rate_bps, created_at, voided_at")
+      .in("client_id", clientIds)
+      .is("voided_at", null)
+      .order("loan_date", { ascending: true }),
   ]);
 
   if (chargesError) {
@@ -110,25 +128,33 @@ async function getLateInterestByClient(clientIds: string[]) {
     throw paymentsError;
   }
 
-  const interestCharges = (charges ?? []) as InterestChargeStatusRow[];
-  const cycleIds = [...new Set(interestCharges.map((charge) => charge.cycle_id))];
-
-  if (cycleIds.length === 0) {
-    return new Map<string, number>();
+  if (loansError) {
+    throw loansError;
   }
 
-  const { data: cycles, error: cyclesError } = await supabase
-    .from("cycles")
-    .select("id, end_date")
-    .in("id", cycleIds);
+  const interestCharges = (charges ?? []) as InterestChargeStatusRow[];
+  const cycleIds = [...new Set(interestCharges.map((charge) => charge.cycle_id))];
+  let cycles: CycleStatusRow[] = [];
 
-  if (cyclesError) {
-    throw cyclesError;
+  if (cycleIds.length > 0) {
+    const { data, error } = await supabase
+      .from("cycles")
+      .select("id, end_date")
+      .in("id", cycleIds);
+
+    if (error) {
+      throw error;
+    }
+
+    cycles = (data ?? []) as CycleStatusRow[];
   }
 
   const today = toDateInputValue();
-  const cyclesById = new Map(((cycles ?? []) as CycleStatusRow[]).map((cycle) => [cycle.id, cycle]));
+  const cyclesById = new Map(cycles.map((cycle) => [cycle.id, cycle]));
+  const generatedCycleEndDatesByClient = new Map<string, Set<string>>();
   const priorCycleInterestByClient = new Map<string, number>();
+  const loansByClient = new Map<string, LoanInterestStatusRow[]>();
+  const paymentsByClient = new Map<string, PaymentInterestStatusRow[]>();
   const paidInterestByClient = new Map<string, number>();
 
   for (const charge of interestCharges) {
@@ -142,13 +168,57 @@ async function getLateInterestByClient(clientIds: string[]) {
       charge.client_id,
       (priorCycleInterestByClient.get(charge.client_id) ?? 0) + charge.interest_amount_cents,
     );
+
+    const generatedDates = generatedCycleEndDatesByClient.get(charge.client_id) ?? new Set<string>();
+    generatedDates.add(cycle.end_date);
+    generatedCycleEndDatesByClient.set(charge.client_id, generatedDates);
   }
 
   for (const payment of (payments ?? []) as PaymentInterestStatusRow[]) {
+    const clientPayments = paymentsByClient.get(payment.client_id) ?? [];
+    clientPayments.push(payment);
+    paymentsByClient.set(payment.client_id, clientPayments);
+
     paidInterestByClient.set(
       payment.client_id,
       (paidInterestByClient.get(payment.client_id) ?? 0) + payment.interest_amount_cents,
     );
+  }
+
+  for (const loan of (loans ?? []) as LoanInterestStatusRow[]) {
+    const clientLoans = loansByClient.get(loan.client_id) ?? [];
+    clientLoans.push(loan);
+    loansByClient.set(loan.client_id, clientLoans);
+  }
+
+  for (const clientId of clientIds) {
+    const clientLoans = loansByClient.get(clientId) ?? [];
+    const firstLoan = clientLoans[0];
+
+    if (!firstLoan) {
+      continue;
+    }
+
+    const generatedDates = generatedCycleEndDatesByClient.get(clientId) ?? new Set<string>();
+    const clientPayments = paymentsByClient.get(clientId) ?? [];
+    const ungeneratedLateInterestCents = listDueCycleRanges(firstLoan.loan_date, today)
+      .filter((range) => range.endDate < today && !generatedDates.has(range.endDate))
+      .reduce((total, range) => {
+        const interest = calculateCycleInterest(
+          clientLoans as InterestLoan[],
+          clientPayments as InterestPayment[],
+          range.endDate,
+        );
+
+        return total + interest.interestAmountCents;
+      }, 0);
+
+    if (ungeneratedLateInterestCents > 0) {
+      priorCycleInterestByClient.set(
+        clientId,
+        (priorCycleInterestByClient.get(clientId) ?? 0) + ungeneratedLateInterestCents,
+      );
+    }
   }
 
   return new Map(

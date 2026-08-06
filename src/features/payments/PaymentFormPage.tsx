@@ -39,7 +39,7 @@ export function PaymentFormPage() {
   const [isReviewing, setIsReviewing] = useState(false);
   const [formError, setFormError] = useState("");
   const [isGeneratingInterest, setIsGeneratingInterest] = useState(false);
-  const generatedInterestClientIds = useRef(new Set<string>());
+  const generatedInterestKeys = useRef(new Set<string>());
 
   const { data: clients = [], isLoading } = useQuery({
     queryKey: ["clients"],
@@ -69,15 +69,21 @@ export function PaymentFormPage() {
   }, [interestBalanceCents, principalBalanceCents, totalAmountCents, totalBalanceCents]);
 
   useEffect(() => {
-    if (!clientId || generatedInterestClientIds.current.has(clientId)) {
+    if (!clientId || !paymentDate) {
+      return;
+    }
+
+    const interestKey = `${clientId}:${paymentDate}`;
+
+    if (generatedInterestKeys.current.has(interestKey)) {
       return;
     }
 
     let cancelled = false;
-    generatedInterestClientIds.current.add(clientId);
+    generatedInterestKeys.current.add(interestKey);
     setIsGeneratingInterest(true);
 
-    generateDueInterestForClient(clientId)
+    generateDueInterestForClient(clientId, paymentDate)
       .then(async () => {
         await Promise.all([
           queryClient.invalidateQueries({ queryKey: ["clients"] }),
@@ -87,6 +93,8 @@ export function PaymentFormPage() {
         ]);
       })
       .catch(() => {
+        generatedInterestKeys.current.delete(interestKey);
+
         if (!cancelled) {
           setFormError("No se pudieron revisar los intereses vencidos de este cliente.");
         }
@@ -100,7 +108,7 @@ export function PaymentFormPage() {
     return () => {
       cancelled = true;
     };
-  }, [clientId, queryClient]);
+  }, [clientId, paymentDate, queryClient]);
 
   const mutation = useMutation({
     mutationFn: createPayment,
@@ -130,6 +138,10 @@ export function PaymentFormPage() {
 
     if (!paymentDate) {
       return "Selecciona la fecha del pago.";
+    }
+
+    if (isGeneratingInterest) {
+      return "Espera un momento mientras se revisan los intereses de la fecha seleccionada.";
     }
 
     if (!Number.isFinite(totalAmountCents) || totalAmountCents <= 0) {
@@ -205,7 +217,16 @@ export function PaymentFormPage() {
           ))}
         </SelectField>
         {isGeneratingInterest ? <p className="text-sm font-medium text-kredo-primary">Revisando intereses vencidos...</p> : null}
-        <Field label="Fecha" onChange={(event) => setPaymentDate(event.target.value)} type="date" value={paymentDate} />
+        <Field
+          label="Fecha"
+          onChange={(event) => {
+            setPaymentDate(event.target.value);
+            setIsReviewing(false);
+            setOverpaymentConfirmed(false);
+          }}
+          type="date"
+          value={paymentDate}
+        />
         <Field
           inputMode="decimal"
           label="Monto pagado"
@@ -305,10 +326,10 @@ export function PaymentFormPage() {
 
         <button
           className="min-h-12 w-full rounded-md bg-kredo-primary px-4 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
-          disabled={mutation.isPending}
+          disabled={mutation.isPending || isGeneratingInterest}
           type="submit"
         >
-          Revisar pago
+          {isGeneratingInterest ? "Revisando intereses..." : "Revisar pago"}
         </button>
 
         {isReviewing ? (
