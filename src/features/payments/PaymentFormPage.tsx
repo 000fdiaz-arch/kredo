@@ -8,7 +8,7 @@ import { useAuth } from "@/features/auth/AuthProvider";
 import { toDateInputValue } from "@/lib/dates";
 import { formatMoney } from "@/lib/money";
 import { listClientsWithBalances } from "@/services/clients.service";
-import { generateDueInterestForClient } from "@/services/interest.service";
+import { generatePaymentInterestForClient } from "@/services/interest.service";
 import { createPayment, type PaymentMethod } from "@/services/payments.service";
 
 const paymentMethods: Array<{ value: PaymentMethod; label: string }> = [
@@ -83,7 +83,7 @@ export function PaymentFormPage() {
     generatedInterestKeys.current.add(interestKey);
     setIsGeneratingInterest(true);
 
-    generateDueInterestForClient(clientId, paymentDate)
+    generatePaymentInterestForClient(clientId, paymentDate)
       .then(async () => {
         await Promise.all([
           queryClient.invalidateQueries({ queryKey: ["clients"] }),
@@ -96,7 +96,7 @@ export function PaymentFormPage() {
         generatedInterestKeys.current.delete(interestKey);
 
         if (!cancelled) {
-          setFormError("No se pudieron revisar los intereses vencidos de este cliente.");
+          setFormError("No se pudieron revisar los intereses cobrables de este cliente.");
         }
       })
       .finally(() => {
@@ -216,7 +216,7 @@ export function PaymentFormPage() {
             </option>
           ))}
         </SelectField>
-        {isGeneratingInterest ? <p className="text-sm font-medium text-kredo-primary">Revisando intereses vencidos...</p> : null}
+        {isGeneratingInterest ? <p className="text-sm font-medium text-kredo-primary">Revisando intereses cobrables...</p> : null}
         <Field
           label="Fecha"
           onChange={(event) => {

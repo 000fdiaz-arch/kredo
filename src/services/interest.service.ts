@@ -1,4 +1,4 @@
-import { getNextCloseDate, listDueCycleRanges, toDateInputValue } from "@/lib/dates";
+import { getCycleRange, getNextCloseDate, listDueCycleRanges, toDateInputValue } from "@/lib/dates";
 import { supabase } from "@/lib/supabase";
 import { getOrCreateCycle } from "@/services/cycles.service";
 import type { Database } from "@/types/database";
@@ -119,6 +119,18 @@ async function listClientIdsWithLoans() {
   return [...new Set((data ?? []).map((loan) => loan.client_id))];
 }
 
+export function listPaymentInterestCycleRanges(startDateValue: string, paymentDateValue: string) {
+  const ranges = listDueCycleRanges(startDateValue, paymentDateValue);
+  const paymentCycle = getCycleRange(paymentDateValue);
+  const existingEndDates = new Set(ranges.map((range) => range.endDate));
+
+  if (startDateValue <= paymentCycle.endDate && !existingEndDates.has(paymentCycle.endDate)) {
+    ranges.push(paymentCycle);
+  }
+
+  return ranges;
+}
+
 export async function getClientInterestStatus(clientId: string, asOfDate = toDateInputValue()): Promise<ClientInterestStatus> {
   const [loans, payments, charges] = await Promise.all([
     listClientLoans(clientId),
@@ -167,7 +179,11 @@ export async function getClientInterestStatus(clientId: string, asOfDate = toDat
   };
 }
 
-export async function generateDueInterestForClient(clientId: string, asOfDate = toDateInputValue()): Promise<InterestChargeRow[]> {
+async function generateInterestForClient(
+  clientId: string,
+  asOfDate: string,
+  getCycleRanges: (startDateValue: string, asOfDateValue: string) => Array<{ startDate: string; endDate: string }>,
+): Promise<InterestChargeRow[]> {
   const [loans, payments] = await Promise.all([listClientLoans(clientId), listClientPayments(clientId)]);
   const firstLoan = loans[0];
 
@@ -175,7 +191,7 @@ export async function generateDueInterestForClient(clientId: string, asOfDate = 
     return [];
   }
 
-  const cycleRanges = listDueCycleRanges(firstLoan.loan_date, asOfDate);
+  const cycleRanges = getCycleRanges(firstLoan.loan_date, asOfDate);
   const created: InterestChargeRow[] = [];
 
   for (const range of cycleRanges) {
@@ -223,6 +239,14 @@ export async function generateDueInterestForClient(clientId: string, asOfDate = 
   }
 
   return created;
+}
+
+export async function generateDueInterestForClient(clientId: string, asOfDate = toDateInputValue()): Promise<InterestChargeRow[]> {
+  return generateInterestForClient(clientId, asOfDate, listDueCycleRanges);
+}
+
+export async function generatePaymentInterestForClient(clientId: string, paymentDate = toDateInputValue()): Promise<InterestChargeRow[]> {
+  return generateInterestForClient(clientId, paymentDate, listPaymentInterestCycleRanges);
 }
 
 export async function generateDueInterestForAllClients(): Promise<InterestChargeRow[]> {

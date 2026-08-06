@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calculateCycleInterest } from "@/services/interest.service";
+import { calculateCycleInterest, listPaymentInterestCycleRanges } from "@/services/interest.service";
 import type { Database } from "@/types/database";
 
 type LoanRow = Database["public"]["Tables"]["loans"]["Row"];
@@ -69,5 +69,19 @@ describe("calculateCycleInterest", () => {
 
     expect(interest.principalBaseCents).toBe(20_000);
     expect(interest.interestAmountCents).toBe(2_000);
+  });
+});
+
+describe("listPaymentInterestCycleRanges", () => {
+  it("includes the payment cycle even before the close date", () => {
+    expect(listPaymentInterestCycleRanges("2026-08-01", "2026-08-06")).toEqual([
+      { startDate: "2026-08-01", endDate: "2026-08-15" },
+    ]);
+  });
+
+  it("does not duplicate a cycle when payment happens on the close date", () => {
+    expect(listPaymentInterestCycleRanges("2026-08-01", "2026-08-15")).toEqual([
+      { startDate: "2026-08-01", endDate: "2026-08-15" },
+    ]);
   });
 });
