@@ -4,19 +4,21 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { Field } from "@/components/ui/Field";
 import { SelectField } from "@/components/ui/SelectField";
 import { useAuth } from "@/features/auth/AuthProvider";
-import { getUserSettings, updateUserSettings } from "@/services/settings.service";
+import { useOrganization } from "@/features/organizations/OrganizationProvider";
+import { getOrganizationSettings, updateOrganizationSettings } from "@/services/settings.service";
 
 export function SettingsPage() {
   const { user } = useAuth();
+  const { organization, organizationId } = useOrganization();
   const queryClient = useQueryClient();
   const [businessName, setBusinessName] = useState("");
   const [interestRate, setInterestRate] = useState("10");
   const [message, setMessage] = useState("");
 
   const settingsQuery = useQuery({
-    queryKey: ["user-settings", user?.id],
-    queryFn: () => getUserSettings(user!.id),
-    enabled: Boolean(user),
+    queryKey: ["organization-settings", organizationId],
+    queryFn: () => getOrganizationSettings(user!.id, organizationId!),
+    enabled: Boolean(user && organizationId),
   });
 
   useEffect(() => {
@@ -26,7 +28,7 @@ export function SettingsPage() {
   }, [settingsQuery.data]);
 
   const mutation = useMutation({
-    mutationFn: () => updateUserSettings(user!.id, {
+    mutationFn: () => updateOrganizationSettings(organizationId!, {
       business_name: businessName,
       currency: "USD",
       default_interest_rate_bps: Math.round(Number(interestRate) * 100),
@@ -34,7 +36,7 @@ export function SettingsPage() {
       capitalize_interest: false,
     }),
     onSuccess: (settings) => {
-      queryClient.setQueryData(["user-settings", user?.id], settings);
+      queryClient.setQueryData(["organization-settings", organizationId], settings);
       setMessage("Configuracion guardada correctamente.");
     },
     onError: (error) => setMessage(error instanceof Error ? error.message : "No se pudo guardar la configuracion."),
@@ -43,6 +45,7 @@ export function SettingsPage() {
   function handleSubmit(event: FormEvent) {
     event.preventDefault();
     setMessage("");
+    if (!organizationId) return setMessage("No se pudo detectar la empresa activa.");
     if (!businessName.trim()) return setMessage("Escribe el nombre del negocio.");
     if (!Number.isFinite(Number(interestRate)) || Number(interestRate) < 0 || Number(interestRate) > 100) {
       return setMessage("La tasa debe estar entre 0% y 100%.");
@@ -52,7 +55,11 @@ export function SettingsPage() {
 
   return (
     <section>
-      <PageHeader eyebrow="Configuracion" title="Configuracion" description="Valores usados para nuevos prestamos y reglas de Kredo." />
+      <PageHeader
+        eyebrow="Configuracion"
+        title="Mi empresa"
+        description={organization ? `Empresa activa: ${organization.name}` : "Valores usados para nuevos prestamos y reglas de Kredo."}
+      />
 
       {settingsQuery.isLoading ? <p className="rounded-lg border border-kredo-line bg-white p-4 text-sm text-kredo-muted">Cargando configuracion...</p> : null}
       {settingsQuery.error ? <p className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-kredo-red">No se pudo cargar la configuracion.</p> : null}

@@ -7,6 +7,7 @@ export type PaymentMethod = PaymentRow["payment_method"];
 
 export type CreatePaymentInput = {
   userId: string;
+  organizationId: string;
   clientId: string;
   paymentDate: string;
   totalAmountCents: number;
@@ -24,12 +25,13 @@ function normalizeOptional(value?: string) {
 }
 
 export async function createPayment(input: CreatePaymentInput): Promise<PaymentRow> {
-  const cycle = await getOrCreateCycle(input.userId, input.paymentDate);
+  const cycle = await getOrCreateCycle(input.userId, input.organizationId, input.paymentDate);
 
-  const { data, error } = await supabase
+  const { data, error } = await (supabase as any)
     .from("payments")
     .insert({
       user_id: input.userId,
+      organization_id: input.organizationId,
       client_id: input.clientId,
       cycle_id: cycle.id,
       payment_date: input.paymentDate,
@@ -48,8 +50,9 @@ export async function createPayment(input: CreatePaymentInput): Promise<PaymentR
     throw error;
   }
 
-  await supabase.from("audit_logs").insert({
+  await (supabase as any).from("audit_logs").insert({
     user_id: input.userId,
+    organization_id: input.organizationId,
     entity_type: "payment",
     entity_id: data.id,
     action: "create",

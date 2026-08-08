@@ -5,11 +5,24 @@
 - Base de datos: PostgreSQL en Supabase.
 - Llaves primarias: UUID generados con `gen_random_uuid()`.
 - Autenticacion: Supabase Auth.
-- Multiusuario: todas las tablas de negocio tendran `user_id`.
+- Multiempresa: las tablas de negocio pertenecen a `organization_id`; `user_id` se conserva para auditoria y compatibilidad.
 - Seguridad: RLS activado en todas las tablas de negocio.
 - Dinero: montos como enteros en centavos.
 - Tasas: puntos base (`interest_rate_bps`).
 - Borrado: no se eliminan movimientos financieros; se anulan.
+
+## Multiempresa / SaaS
+
+Kredo separa los datos por empresa usando `organizations` y `organization_members`.
+Cada cliente de Kredo tiene una organizacion, y cada usuario pertenece a una o mas organizaciones con un rol.
+
+Regla principal de seguridad:
+
+```sql
+public.is_organization_member(organization_id)
+```
+
+Las politicas RLS de clientes, prestamos, pagos, ciclos, intereses, ajustes, notas, auditoria y movimientos financieros deben validar membresia por `organization_id`.
 
 ## 2. Extensiones
 

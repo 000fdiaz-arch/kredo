@@ -6,6 +6,7 @@ export type LoanRow = Database["public"]["Tables"]["loans"]["Row"];
 
 export type CreateLoanInput = {
   userId: string;
+  organizationId: string;
   clientId: string;
   loanDate: string;
   amountCents: number;
@@ -16,6 +17,7 @@ export type CreateLoanInput = {
 export type VoidLoanInput = {
   loanId: string;
   userId: string;
+  organizationId: string;
   reason: string;
 };
 
@@ -25,12 +27,13 @@ function normalizeOptional(value?: string) {
 }
 
 export async function createLoan(input: CreateLoanInput): Promise<LoanRow> {
-  const cycle = await getOrCreateCycle(input.userId, input.loanDate);
+  const cycle = await getOrCreateCycle(input.userId, input.organizationId, input.loanDate);
 
-  const { data, error } = await supabase
+  const { data, error } = await (supabase as any)
     .from("loans")
     .insert({
       user_id: input.userId,
+      organization_id: input.organizationId,
       client_id: input.clientId,
       cycle_id: cycle.id,
       loan_date: input.loanDate,
@@ -55,11 +58,11 @@ export async function voidLoan(input: VoidLoanInput): Promise<LoanRow> {
     throw new Error("Void reason is required");
   }
 
-  const { data: existing, error: lookupError } = await supabase
+  const { data: existing, error: lookupError } = await (supabase as any)
     .from("loans")
     .select("*")
     .eq("id", input.loanId)
-    .eq("user_id", input.userId)
+    .eq("organization_id", input.organizationId)
     .maybeSingle();
 
   if (lookupError) {
@@ -74,7 +77,7 @@ export async function voidLoan(input: VoidLoanInput): Promise<LoanRow> {
     return existing;
   }
 
-  const { data, error } = await supabase
+  const { data, error } = await (supabase as any)
     .from("loans")
     .update({
       voided_at: new Date().toISOString(),
@@ -82,7 +85,7 @@ export async function voidLoan(input: VoidLoanInput): Promise<LoanRow> {
       void_reason: reason,
     })
     .eq("id", input.loanId)
-    .eq("user_id", input.userId)
+    .eq("organization_id", input.organizationId)
     .select("*")
     .single();
 
@@ -90,8 +93,9 @@ export async function voidLoan(input: VoidLoanInput): Promise<LoanRow> {
     throw error;
   }
 
-  await supabase.from("audit_logs").insert({
+  await (supabase as any).from("audit_logs").insert({
     user_id: input.userId,
+    organization_id: input.organizationId,
     entity_type: "loan",
     entity_id: input.loanId,
     action: "void",

@@ -2,6 +2,7 @@ import { LogOut, Menu, Users, WalletCards, ReceiptText, BarChart3, MoreHorizonta
 import { NavLink, Outlet } from "react-router-dom";
 import { clsx } from "clsx";
 import { useAuth } from "@/features/auth/AuthProvider";
+import { useOrganization } from "@/features/organizations/OrganizationProvider";
 
 const primaryNavItems = [
   { label: "Inicio", to: "/dashboard", icon: BarChart3 },
@@ -13,6 +14,7 @@ const primaryNavItems = [
 
 export function AppLayout() {
   const { user, signOut } = useAuth();
+  const { organization } = useOrganization();
 
   return (
     <div className="min-h-screen bg-kredo-surface text-kredo-ink">
@@ -20,7 +22,8 @@ export function AppLayout() {
         <div className="mx-auto flex max-w-5xl items-center justify-between gap-3">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-kredo-primary">Kredo</p>
-            <p className="max-w-[220px] truncate text-sm text-kredo-muted">{user?.email ?? "Administrador"}</p>
+            <p className="max-w-[220px] truncate text-sm font-semibold text-kredo-ink">{organization?.name ?? "Mi empresa"}</p>
+            <p className="max-w-[220px] truncate text-xs text-kredo-muted">{user?.email ?? "Administrador"}</p>
           </div>
           <div className="flex items-center gap-2">
             <NavLink

@@ -13,6 +13,7 @@ export type ClientWithBalance = ClientRow & {
 
 export type CreateClientInput = {
   userId: string;
+  organizationId: string;
   fullName: string;
   identification?: string;
   phone?: string;
@@ -266,10 +267,11 @@ async function applyDisplayStatuses<T extends ClientWithBalance>(clients: T[]): 
 }
 
 export async function createClient(input: CreateClientInput): Promise<ClientRow> {
-  const { data, error } = await supabase
+  const { data, error } = await (supabase as any)
     .from("clients")
     .insert({
       user_id: input.userId,
+      organization_id: input.organizationId,
       client_code: createClientCode(),
       full_name: input.fullName.trim(),
       identification: normalizeOptional(input.identification),
@@ -291,7 +293,7 @@ export async function createClient(input: CreateClientInput): Promise<ClientRow>
 }
 
 export async function updateClient(input: UpdateClientInput): Promise<ClientRow> {
-  const { data, error } = await supabase
+  const { data, error } = await (supabase as any)
     .from("clients")
     .update({
       full_name: input.fullName.trim(),
@@ -303,7 +305,7 @@ export async function updateClient(input: UpdateClientInput): Promise<ClientRow>
       notes: normalizeOptional(input.notes),
     })
     .eq("id", input.clientId)
-    .eq("user_id", input.userId)
+    .eq("organization_id", input.organizationId)
     .select("*")
     .single();
 

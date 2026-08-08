@@ -153,7 +153,7 @@ export async function getClientInterestStatus(clientId: string, asOfDate = toDat
   const cycles = await Promise.all(
     cycleRanges.map(async (range) => ({
       range,
-      cycle: await getOrCreateCycle(firstLoan.user_id, range.endDate),
+      cycle: await getOrCreateCycle(firstLoan.user_id, (firstLoan as any).organization_id, range.endDate),
     })),
   );
 
@@ -195,8 +195,8 @@ async function generateInterestForClient(
   const created: InterestChargeRow[] = [];
 
   for (const range of cycleRanges) {
-    const cycle = await getOrCreateCycle(firstLoan.user_id, range.endDate);
-    const { data: existing, error: lookupError } = await supabase
+    const cycle = await getOrCreateCycle(firstLoan.user_id, (firstLoan as any).organization_id, range.endDate);
+    const { data: existing, error: lookupError } = await (supabase as any)
       .from("interest_charges")
       .select("*")
       .eq("client_id", clientId)
@@ -218,10 +218,11 @@ async function generateInterestForClient(
       continue;
     }
 
-    const { data, error } = await supabase
+    const { data, error } = await (supabase as any)
       .from("interest_charges")
       .insert({
         user_id: firstLoan.user_id,
+        organization_id: (firstLoan as any).organization_id,
         client_id: clientId,
         cycle_id: cycle.id,
         principal_base_cents: interest.principalBaseCents,

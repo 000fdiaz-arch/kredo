@@ -4,6 +4,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Field } from "@/components/ui/Field";
 import { useAuth } from "@/features/auth/AuthProvider";
+import { useOrganization } from "@/features/organizations/OrganizationProvider";
 import {
   createClient,
   getClientWithBalance,
@@ -17,6 +18,7 @@ export function ClientFormPage() {
   const { clientId } = useParams();
   const queryClient = useQueryClient();
   const { user } = useAuth();
+  const { organizationId, loading: organizationLoading } = useOrganization();
   const isEditing = Boolean(clientId);
   const [fullName, setFullName] = useState("");
   const [identification, setIdentification] = useState("");
@@ -70,7 +72,7 @@ export function ClientFormPage() {
     event.preventDefault();
     setFormError("");
 
-    if (!user) {
+    if (!user || !organizationId) {
       setFormError(isEditing ? "Debes iniciar sesion para editar clientes." : "Debes iniciar sesion para crear clientes.");
       return;
     }
@@ -82,6 +84,7 @@ export function ClientFormPage() {
 
     const input = {
       userId: user.id,
+      organizationId,
       fullName,
       identification,
       phone,
@@ -180,7 +183,7 @@ export function ClientFormPage() {
 
         <button
           className="min-h-12 w-full rounded-md bg-kredo-primary px-4 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
-          disabled={mutation.isPending}
+          disabled={mutation.isPending || organizationLoading}
           type="submit"
         >
           {mutation.isPending ? "Guardando..." : isEditing ? "Guardar cambios" : "Crear cliente"}

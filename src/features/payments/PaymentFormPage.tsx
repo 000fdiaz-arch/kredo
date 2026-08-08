@@ -5,6 +5,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { Field } from "@/components/ui/Field";
 import { SelectField } from "@/components/ui/SelectField";
 import { useAuth } from "@/features/auth/AuthProvider";
+import { useOrganization } from "@/features/organizations/OrganizationProvider";
 import { toDateInputValue } from "@/lib/dates";
 import { formatMoney } from "@/lib/money";
 import { listClientsWithBalances } from "@/services/clients.service";
@@ -29,6 +30,7 @@ export function PaymentFormPage() {
   const [searchParams] = useSearchParams();
   const queryClient = useQueryClient();
   const { user } = useAuth();
+  const { organizationId } = useOrganization();
   const [clientId, setClientId] = useState(searchParams.get("clientId") ?? "");
   const [paymentDate, setPaymentDate] = useState(toDateInputValue());
   const [amount, setAmount] = useState("");
@@ -128,7 +130,7 @@ export function PaymentFormPage() {
   });
 
   function validateForm() {
-    if (!user) {
+    if (!user || !organizationId) {
       return "Debes iniciar sesion para registrar pagos.";
     }
 
@@ -173,12 +175,13 @@ export function PaymentFormPage() {
     const validationError = validateForm();
     setFormError(validationError);
 
-    if (validationError || !user) {
+    if (validationError || !user || !organizationId) {
       return;
     }
 
     mutation.mutate({
       userId: user.id,
+      organizationId,
       clientId,
       paymentDate,
       totalAmountCents,

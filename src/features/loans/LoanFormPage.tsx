@@ -7,18 +7,20 @@ import { Field } from "@/components/ui/Field";
 import { SelectField } from "@/components/ui/SelectField";
 import { listClientsWithBalances } from "@/services/clients.service";
 import { useAuth } from "@/features/auth/AuthProvider";
+import { useOrganization } from "@/features/organizations/OrganizationProvider";
 import { createLoan } from "@/services/loans.service";
 import { formatMoney } from "@/lib/money";
 import { getCycleRange, toDateInputValue } from "@/lib/dates";
 import { getAvailableCashCents } from "@/services/financial-movements.service";
 import { calculateLendingLimitGuidance } from "@/services/lending-limits";
-import { getUserSettings } from "@/services/settings.service";
+import { getOrganizationSettings } from "@/services/settings.service";
 
 export function LoanFormPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const queryClient = useQueryClient();
   const { user } = useAuth();
+  const { organizationId } = useOrganization();
   const [clientId, setClientId] = useState(searchParams.get("clientId") ?? "");
   const [loanDate, setLoanDate] = useState(toDateInputValue());
   const [amount, setAmount] = useState("");
@@ -38,9 +40,9 @@ export function LoanFormPage() {
   });
 
   const { data: settings } = useQuery({
-    queryKey: ["user-settings", user?.id],
-    queryFn: () => getUserSettings(user!.id),
-    enabled: Boolean(user),
+    queryKey: ["organization-settings", organizationId],
+    queryFn: () => getOrganizationSettings(user!.id, organizationId!),
+    enabled: Boolean(user && organizationId),
   });
 
   useEffect(() => {
@@ -74,7 +76,7 @@ export function LoanFormPage() {
   });
 
   function validateForm() {
-    if (!user) {
+    if (!user || !organizationId) {
       return "Debes iniciar sesion para registrar prestamos.";
     }
 
@@ -111,12 +113,13 @@ export function LoanFormPage() {
     const validationError = validateForm();
     setFormError(validationError);
 
-    if (validationError || !user) {
+    if (validationError || !user || !organizationId) {
       return;
     }
 
     mutation.mutate({
       userId: user.id,
+      organizationId,
       clientId,
       loanDate,
       amountCents,

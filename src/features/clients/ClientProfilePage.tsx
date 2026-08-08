@@ -10,6 +10,7 @@ import { getClientWithBalance } from "@/services/clients.service";
 import { listClientMovements, type ClientMovementRow } from "@/services/movements.service";
 import { voidLoan } from "@/services/loans.service";
 import { useAuth } from "@/features/auth/AuthProvider";
+import { useOrganization } from "@/features/organizations/OrganizationProvider";
 import { generateDueInterestForClient, getClientInterestStatus } from "@/services/interest.service";
 
 const movementLabels: Record<ClientMovementRow["movement_type"], string> = {
@@ -23,6 +24,7 @@ const movementLabels: Record<ClientMovementRow["movement_type"], string> = {
 export function ClientProfilePage() {
   const { clientId = "" } = useParams();
   const { user } = useAuth();
+  const { organizationId } = useOrganization();
   const queryClient = useQueryClient();
   const [movementToVoid, setMovementToVoid] = useState<ClientMovementRow | null>(null);
   const [voidReason, setVoidReason] = useState("");
@@ -111,7 +113,7 @@ export function ClientProfilePage() {
   function handleVoidConfirm() {
     setVoidError("");
 
-    if (!user || !movementToVoid) {
+    if (!user || !organizationId || !movementToVoid) {
       setVoidError("Debes iniciar sesion para anular movimientos.");
       return;
     }
@@ -129,6 +131,7 @@ export function ClientProfilePage() {
     voidMutation.mutate({
       loanId: movementToVoid.movement_id,
       userId: user.id,
+      organizationId,
       reason: voidReason,
     });
   }
