@@ -99,10 +99,17 @@ export function LoginPage() {
           </p>
 
           <div className="mt-7 grid gap-3 text-sm text-kredo-ink sm:grid-cols-3">
-            {["Clientes separados por empresa", "Recibos y saldos al dia", "Ciclos e intereses claros"].map((item) => (
-              <div className="flex items-start gap-2 rounded-md border border-kredo-line bg-white px-3 py-3" key={item}>
+            {[
+              { title: "Clientes", helper: "Historial y saldos claros." },
+              { title: "Prestamos", helper: "Desembolsos, ciclos e intereses." },
+              { title: "Pagos", helper: "Recibos y abonos al dia." },
+            ].map((item) => (
+              <div className="flex items-start gap-2 rounded-md border border-kredo-line bg-white px-3 py-3" key={item.title}>
                 <CheckCircle2 className="mt-0.5 h-4 w-4 flex-none text-kredo-green" aria-hidden="true" />
-                <span className="font-medium leading-5">{item}</span>
+                <span className="leading-5">
+                  <span className="block font-semibold">{item.title}</span>
+                  <span className="block text-kredo-muted">{item.helper}</span>
+                </span>
               </div>
             ))}
           </div>
