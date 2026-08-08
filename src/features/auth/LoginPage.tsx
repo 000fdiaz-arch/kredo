@@ -69,8 +69,9 @@ export function LoginPage() {
       if (signUpError) {
         setError("No se pudo crear la cuenta. Revisa los datos e intenta otra vez.");
       } else {
-        setNotice("Cuenta creada. Si Supabase pide confirmacion, revisa tu correo antes de iniciar sesion.");
+        setNotice("Cuenta creada. Revisa tu correo para confirmar el acceso antes de iniciar sesion.");
         setMode("sign-in");
+        setPassword("");
       }
 
       setSubmitting(false);
