@@ -200,12 +200,12 @@ export function DashboardPage() {
       </div>
 
       {isLoading ? (
-        <article className="rounded-lg border border-kredo-line bg-white p-4 text-sm text-kredo-muted">Cargando datos desde Supabase...</article>
+        <article className="rounded-lg border border-kredo-line bg-white p-4 text-sm text-kredo-muted">Cargando datos...</article>
       ) : null}
 
       {error ? (
         <article className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm font-medium text-kredo-red">
-          No se pudieron cargar todos los datos del resumen. Refresca la pagina; si continua, revisamos la consulta de Supabase.
+          No se pudieron cargar todos los datos del resumen. Refresca la pagina e intenta nuevamente.
         </article>
       ) : null}
 
@@ -258,7 +258,7 @@ export function DashboardPage() {
 
         {!isLoading && !error && (data?.clients.length ?? 0) === 0 ? (
           <article className="rounded-lg border border-dashed border-kredo-line bg-white p-4 text-sm text-kredo-muted">
-            Aun no hay clientes en Supabase.
+            Aun no hay clientes registrados en esta empresa.
           </article>
         ) : null}
 

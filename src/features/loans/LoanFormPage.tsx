@@ -133,7 +133,7 @@ export function LoanFormPage() {
       <PageHeader
         eyebrow="Nuevo prestamo"
         title="Registrar prestamo"
-        description="Revisa el resumen antes de guardar el movimiento en Supabase."
+        description="Revisa el resumen antes de guardar el movimiento."
       />
 
       <form className="space-y-4 rounded-lg border border-kredo-line bg-white p-4" onSubmit={handleReview}>

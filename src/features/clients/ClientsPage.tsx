@@ -56,12 +56,12 @@ export function ClientsPage() {
       </div>
 
       {isLoading ? (
-        <article className="rounded-lg border border-kredo-line bg-white p-4 text-sm text-kredo-muted">Cargando clientes desde Supabase...</article>
+        <article className="rounded-lg border border-kredo-line bg-white p-4 text-sm text-kredo-muted">Cargando clientes...</article>
       ) : null}
 
       {error ? (
         <article className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm font-medium text-kredo-red">
-          No se pudieron cargar los clientes. Revisa que la migracion inicial este aplicada en Supabase.
+          No se pudieron cargar los clientes. Refresca la pagina e intenta nuevamente.
         </article>
       ) : null}
 
@@ -99,7 +99,7 @@ export function ClientsPage() {
 
       {!isLoading && !error && clients.length === 0 ? (
         <article className="rounded-lg border border-dashed border-kredo-line bg-white p-4 text-sm text-kredo-muted">
-          Aun no hay clientes en Supabase.
+          Aun no hay clientes registrados en esta empresa.
         </article>
       ) : null}
 

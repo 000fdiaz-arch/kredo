@@ -137,7 +137,7 @@ export function ClientProfilePage() {
   }
 
   if (isLoading) {
-    return <article className="rounded-lg border border-kredo-line bg-white p-4 text-sm text-kredo-muted">Cargando perfil desde Supabase...</article>;
+    return <article className="rounded-lg border border-kredo-line bg-white p-4 text-sm text-kredo-muted">Cargando perfil...</article>;
   }
 
   if (error) {
@@ -150,7 +150,7 @@ export function ClientProfilePage() {
 
   return (
     <section>
-      <PageHeader eyebrow="Perfil" title={client.full_name} description="Perfil conectado a Supabase." />
+      <PageHeader eyebrow="Perfil" title={client.full_name} description="Informacion, saldo e historial del cliente." />
 
       <div className="mb-4 flex items-center justify-between rounded-lg border border-kredo-line bg-white p-4">
         <div>

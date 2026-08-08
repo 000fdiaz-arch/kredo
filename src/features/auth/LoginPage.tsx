@@ -38,7 +38,7 @@ export function LoginPage() {
     setNotice("");
 
     if (!isSupabaseConfigured) {
-      setError("Configura VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY para iniciar sesion.");
+      setError("El acceso no esta configurado correctamente. Contacta al administrador.");
       return;
     }
 
