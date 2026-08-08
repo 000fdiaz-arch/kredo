@@ -2,19 +2,7 @@ import { createBrowserRouter, Navigate } from "react-router-dom";
 import { ProtectedRoute } from "@/features/auth/ProtectedRoute";
 import { LoginPage } from "@/features/auth/LoginPage";
 import { AppLayout } from "@/components/layout/AppLayout";
-import { DashboardPage } from "@/features/dashboard/DashboardPage";
-import { ClientsPage } from "@/features/clients/ClientsPage";
-import { ClientProfilePage } from "@/features/clients/ClientProfilePage";
-import { ClientFormPage } from "@/features/clients/ClientFormPage";
-import { LoanFormPage } from "@/features/loans/LoanFormPage";
-import { PaymentFormPage } from "@/features/payments/PaymentFormPage";
-import { CyclesPage } from "@/features/cycles/CyclesPage";
-import { CyclePaymentsPage } from "@/features/cycles/CyclePaymentsPage";
-import { HistoryPage } from "@/features/history/HistoryPage";
-import { ReportsPage } from "@/features/reports/ReportsPage";
-import { SettingsPage } from "@/features/settings/SettingsPage";
-import { ReceiptPage } from "@/features/receipts/ReceiptPage";
-import { ClientStatementPage } from "@/features/statements/ClientStatementPage";
+import { LoadingScreen } from "@/components/layout/LoadingScreen";
 import { NotFoundPage } from "@/components/layout/NotFoundPage";
 
 export const router = createBrowserRouter([
@@ -24,25 +12,26 @@ export const router = createBrowserRouter([
   },
   {
     element: <ProtectedRoute />,
+    hydrateFallbackElement: <LoadingScreen />,
     children: [
       {
         element: <AppLayout />,
         children: [
           { index: true, element: <Navigate to="/dashboard" replace /> },
-          { path: "/dashboard", element: <DashboardPage /> },
-          { path: "/clients", element: <ClientsPage /> },
-          { path: "/clients/new", element: <ClientFormPage /> },
-          { path: "/clients/:clientId", element: <ClientProfilePage /> },
-          { path: "/clients/:clientId/edit", element: <ClientFormPage /> },
-          { path: "/loans/new", element: <LoanFormPage /> },
-          { path: "/payments/new", element: <PaymentFormPage /> },
-          { path: "/cycles/payments", element: <CyclePaymentsPage /> },
-          { path: "/cycles", element: <CyclesPage /> },
-          { path: "/history", element: <HistoryPage /> },
-          { path: "/reports", element: <ReportsPage /> },
-          { path: "/settings", element: <SettingsPage /> },
-          { path: "/receipts/:receiptType/:receiptId", element: <ReceiptPage /> },
-          { path: "/clients/:clientId/statement", element: <ClientStatementPage /> },
+          { path: "/dashboard", lazy: async () => ({ Component: (await import("@/features/dashboard/DashboardPage")).DashboardPage }) },
+          { path: "/clients", lazy: async () => ({ Component: (await import("@/features/clients/ClientsPage")).ClientsPage }) },
+          { path: "/clients/new", lazy: async () => ({ Component: (await import("@/features/clients/ClientFormPage")).ClientFormPage }) },
+          { path: "/clients/:clientId", lazy: async () => ({ Component: (await import("@/features/clients/ClientProfilePage")).ClientProfilePage }) },
+          { path: "/clients/:clientId/edit", lazy: async () => ({ Component: (await import("@/features/clients/ClientFormPage")).ClientFormPage }) },
+          { path: "/loans/new", lazy: async () => ({ Component: (await import("@/features/loans/LoanFormPage")).LoanFormPage }) },
+          { path: "/payments/new", lazy: async () => ({ Component: (await import("@/features/payments/PaymentFormPage")).PaymentFormPage }) },
+          { path: "/cycles/payments", lazy: async () => ({ Component: (await import("@/features/cycles/CyclePaymentsPage")).CyclePaymentsPage }) },
+          { path: "/cycles", lazy: async () => ({ Component: (await import("@/features/cycles/CyclesPage")).CyclesPage }) },
+          { path: "/history", lazy: async () => ({ Component: (await import("@/features/history/HistoryPage")).HistoryPage }) },
+          { path: "/reports", lazy: async () => ({ Component: (await import("@/features/reports/ReportsPage")).ReportsPage }) },
+          { path: "/settings", lazy: async () => ({ Component: (await import("@/features/settings/SettingsPage")).SettingsPage }) },
+          { path: "/receipts/:receiptType/:receiptId", lazy: async () => ({ Component: (await import("@/features/receipts/ReceiptPage")).ReceiptPage }) },
+          { path: "/clients/:clientId/statement", lazy: async () => ({ Component: (await import("@/features/statements/ClientStatementPage")).ClientStatementPage }) },
         ],
       },
     ],

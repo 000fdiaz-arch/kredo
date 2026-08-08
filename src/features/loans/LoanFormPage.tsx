@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Field } from "@/components/ui/Field";
@@ -12,6 +12,7 @@ import { formatMoney } from "@/lib/money";
 import { getCycleRange, toDateInputValue } from "@/lib/dates";
 import { getAvailableCashCents } from "@/services/financial-movements.service";
 import { calculateLendingLimitGuidance } from "@/services/lending-limits";
+import { getUserSettings } from "@/services/settings.service";
 
 export function LoanFormPage() {
   const navigate = useNavigate();
@@ -35,6 +36,16 @@ export function LoanFormPage() {
     queryKey: ["available-cash"],
     queryFn: getAvailableCashCents,
   });
+
+  const { data: settings } = useQuery({
+    queryKey: ["user-settings", user?.id],
+    queryFn: () => getUserSettings(user!.id),
+    enabled: Boolean(user),
+  });
+
+  useEffect(() => {
+    if (settings) setInterestRate(String(settings.default_interest_rate_bps / 100));
+  }, [settings]);
 
   const selectedClient = clients.find((client) => client.id === clientId);
   const amountCents = Math.round(Number(amount || "0") * 100);
@@ -79,8 +90,8 @@ export function LoanFormPage() {
       return "El monto prestado debe ser mayor que cero.";
     }
 
-    if (!Number.isFinite(interestRateBps) || interestRateBps < 0) {
-      return "El interes no puede ser negativo.";
+    if (!Number.isFinite(interestRateBps) || interestRateBps < 0 || interestRateBps > 10000) {
+      return "El interes debe estar entre 0% y 100%.";
     }
 
     return "";
@@ -152,6 +163,7 @@ export function LoanFormPage() {
         <Field
           inputMode="decimal"
           label="Interes (%)"
+          max="100"
           min="0"
           onChange={(event) => setInterestRate(event.target.value)}
           placeholder="10"

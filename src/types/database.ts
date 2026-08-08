@@ -5,6 +5,48 @@ export type ClientStatus = "current" | "interest_pending" | "late" | "no_movemen
 export type Database = {
   public: {
     Tables: {
+      user_settings: {
+        Row: {
+          id: string;
+          user_id: string;
+          business_name: string;
+          currency: string;
+          default_interest_rate_bps: number;
+          payment_application_rule: string;
+          capitalize_interest: boolean;
+          first_cycle_close_day: number;
+          second_cycle_close_rule: string;
+          payment_methods: Json;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          business_name?: string;
+          currency?: string;
+          default_interest_rate_bps?: number;
+          payment_application_rule?: string;
+          capitalize_interest?: boolean;
+          first_cycle_close_day?: number;
+          second_cycle_close_rule?: string;
+          payment_methods?: Json;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          business_name?: string;
+          currency?: string;
+          default_interest_rate_bps?: number;
+          payment_application_rule?: string;
+          capitalize_interest?: boolean;
+          first_cycle_close_day?: number;
+          second_cycle_close_rule?: string;
+          payment_methods?: Json;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
       clients: {
         Row: {
           id: string;

@@ -1,5 +1,11 @@
 # Kredo - Plan de implementacion
 
+## Estado de la V1 (agosto de 2026)
+
+Las fases 1 a 6 estan implementadas: autenticacion, clientes, prestamos, pagos, saldos, ciclos e intereses, anulaciones, dashboard, historial general, configuracion persistente, reportes CSV, pruebas automatizadas y documentacion operativa. `npm test -- --run` y `npm run build` son los controles obligatorios antes de desplegar.
+
+La unica validacion externa pendiente es reconciliar los resultados con el archivo Excel historico, que no esta disponible en el workspace ni en la carpeta Descargas. Esta validacion requiere una copia de los datos reales y no cambia el funcionamiento del producto.
+
 ## 1. Objetivo
 
 Kredo reemplazara el archivo de Excel usado para administrar una pequena cartera de prestamos personales. La primera version debe permitir autenticar al administrador, registrar clientes, prestamos, pagos, intereses por ciclo, anulaciones, saldos calculados e historiales completos.
