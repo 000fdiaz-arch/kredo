@@ -25,7 +25,7 @@ export async function getCurrentCyclePaymentBreakdown(): Promise<CyclePaymentBre
   const cycleRange = getCycleRange(toDateInputValue());
   const { data, error } = await supabase
     .from("payments")
-    .select("*, clients(full_name)")
+    .select("*, clients!payments_client_organization_fk(full_name)")
     .gte("payment_date", cycleRange.startDate)
     .lte("payment_date", cycleRange.endDate)
     .is("voided_at", null)

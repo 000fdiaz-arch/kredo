@@ -26,7 +26,7 @@ export type PaymentReceipt = PaymentRow & {
 export async function getLoanReceipt(loanId: string): Promise<LoanReceipt | null> {
   const { data, error } = await supabase
     .from("loans")
-    .select("*, clients(full_name, identification, phone), cycles(start_date, end_date)")
+    .select("*, clients!loans_client_organization_fk(full_name, identification, phone), cycles!loans_cycle_organization_fk(start_date, end_date)")
     .eq("id", loanId)
     .maybeSingle();
 
@@ -40,7 +40,7 @@ export async function getLoanReceipt(loanId: string): Promise<LoanReceipt | null
 export async function getPaymentReceipt(paymentId: string): Promise<PaymentReceipt | null> {
   const { data, error } = await supabase
     .from("payments")
-    .select("*, clients(full_name, identification, phone), cycles(start_date, end_date)")
+    .select("*, clients!payments_client_organization_fk(full_name, identification, phone), cycles!payments_cycle_organization_fk(start_date, end_date)")
     .eq("id", paymentId)
     .maybeSingle();
 

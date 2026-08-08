@@ -14,7 +14,7 @@ export async function getClientStatement(clientId: string) {
     getClientWithBalance(clientId),
     supabase
       .from("payments")
-      .select("*, cycles(start_date, end_date)")
+      .select("*, cycles!payments_cycle_organization_fk(start_date, end_date)")
       .eq("client_id", clientId)
       .is("voided_at", null)
       .order("payment_date", { ascending: false })

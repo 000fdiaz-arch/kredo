@@ -205,7 +205,7 @@ export function DashboardPage() {
 
       {error ? (
         <article className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm font-medium text-kredo-red">
-          No se pudieron cargar los datos. Revisa que la migracion de movimientos financieros este aplicada en Supabase.
+          No se pudieron cargar todos los datos del resumen. Refresca la pagina; si continua, revisamos la consulta de Supabase.
         </article>
       ) : null}
 
