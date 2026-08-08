@@ -59,6 +59,7 @@ export function LoginPage() {
         email,
         password,
         options: {
+          emailRedirectTo: `${window.location.origin}/dashboard`,
           data: {
             business_name: businessName.trim(),
             full_name: fullName.trim(),
