@@ -28,6 +28,15 @@ export type FinancialIndicators = ReturnType<typeof calculateFinancialSummary> &
   cycleCapitalRotation: number;
 };
 
+export type CreateCapitalContributionInput = {
+  userId: string;
+  organizationId: string;
+  movementDate: string;
+  amountCents: number;
+  source: "loan_cash_funding" | "manual_cash_reconciliation";
+  description: string;
+};
+
 type InterestChargeAmountRow = {
   interest_amount_cents: number;
 };
@@ -261,6 +270,49 @@ export async function getFinancialIndicators(activePortfolioCents: number): Prom
 export async function getAvailableCashCents() {
   const movements = await listFinancialMovements();
   return calculateFinancialSummary(movements).availableCashCents;
+}
+
+export async function createCapitalContribution(input: CreateCapitalContributionInput): Promise<FinancialMovementRow> {
+  if (!Number.isInteger(input.amountCents) || input.amountCents <= 0) {
+    throw new Error("Capital contribution must be a positive integer amount");
+  }
+
+  const { data, error } = await (supabase as any)
+    .from("financial_movements")
+    .insert({
+      user_id: input.userId,
+      organization_id: input.organizationId,
+      movement_date: input.movementDate,
+      movement_type: "capital_contribution",
+      amount_cents: input.amountCents,
+      source: input.source,
+      description: input.description,
+      created_by: input.userId,
+    })
+    .select("*")
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  return asFinancialMovement(data);
+}
+
+export async function voidCapitalContribution(movementId: string, userId: string, reason: string) {
+  const { error } = await (supabase as any)
+    .from("financial_movements")
+    .update({
+      voided_at: new Date().toISOString(),
+      voided_by: userId,
+      void_reason: reason,
+    })
+    .eq("id", movementId)
+    .eq("movement_type", "capital_contribution");
+
+  if (error) {
+    throw error;
+  }
 }
 
 export function getMovementTypeLabel(type: FinancialMovementType) {

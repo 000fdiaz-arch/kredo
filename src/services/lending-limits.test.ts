@@ -1,19 +1,22 @@
 import { describe, expect, it } from "vitest";
-import { calculateLendingLimitGuidance } from "@/services/lending-limits";
+import { calculateFundingShortfallCents, calculateLendingLimitGuidance } from "@/services/lending-limits";
 
-describe("lending limit guidance", () => {
-  it("uses 10%, 15%, and 20% cash thresholds per borrower", () => {
-    const guidance = calculateLendingLimitGuidance(44_200, 6_700);
-
-    expect(guidance.normalLimitCents).toBe(4_420);
-    expect(guidance.recommendedLimitCents).toBe(6_630);
-    expect(guidance.exceptionalLimitCents).toBe(8_840);
-    expect(guidance.riskLevel).toBe("exceptional");
+describe("lending cash guidance", () => {
+  it("calculates only the missing cash as a proposed capital contribution", () => {
+    expect(calculateFundingShortfallCents(4_000, 10_000)).toBe(6_000);
+    expect(calculateFundingShortfallCents(10_000, 4_000)).toBe(0);
   });
 
-  it("marks a loan inside the normal concentration limit as ok", () => {
-    const guidance = calculateLendingLimitGuidance(44_200, 4_000);
+  it("includes an existing negative balance when calculating the amount to reconcile", () => {
+    expect(calculateFundingShortfallCents(-65_700, 10_000)).toBe(75_700);
+  });
 
+  it("never presents negative lending limits", () => {
+    const guidance = calculateLendingLimitGuidance(-65_700, 0);
+
+    expect(guidance.normalLimitCents).toBe(0);
+    expect(guidance.recommendedLimitCents).toBe(0);
+    expect(guidance.exceptionalLimitCents).toBe(0);
     expect(guidance.riskLevel).toBe("ok");
   });
 });

@@ -7,12 +7,17 @@ export type LendingLimitGuidance = {
   message: string;
 };
 
-export function calculateLendingLimitGuidance(availableCashCents: number, requestedAmountCents: number): LendingLimitGuidance {
-  const normalLimitCents = Math.floor(availableCashCents * 0.1);
-  const recommendedLimitCents = Math.floor(availableCashCents * 0.15);
-  const exceptionalLimitCents = Math.floor(availableCashCents * 0.2);
+export function calculateFundingShortfallCents(availableCashCents: number, requestedAmountCents: number) {
+  return Math.max(requestedAmountCents - availableCashCents, 0);
+}
 
-  if (requestedAmountCents > availableCashCents) {
+export function calculateLendingLimitGuidance(availableCashCents: number, requestedAmountCents: number): LendingLimitGuidance {
+  const limitBaseCents = Math.max(availableCashCents, 0);
+  const normalLimitCents = Math.floor(limitBaseCents * 0.1);
+  const recommendedLimitCents = Math.floor(limitBaseCents * 0.15);
+  const exceptionalLimitCents = Math.floor(limitBaseCents * 0.2);
+
+  if (requestedAmountCents > limitBaseCents) {
     return {
       availableCashCents,
       normalLimitCents,

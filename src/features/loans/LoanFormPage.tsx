@@ -11,8 +11,8 @@ import { useOrganization } from "@/features/organizations/OrganizationProvider";
 import { createLoan } from "@/services/loans.service";
 import { formatMoney } from "@/lib/money";
 import { getCycleRange, toDateInputValue } from "@/lib/dates";
-import { getAvailableCashCents } from "@/services/financial-movements.service";
-import { calculateLendingLimitGuidance } from "@/services/lending-limits";
+import { createCapitalContribution, getAvailableCashCents, voidCapitalContribution } from "@/services/financial-movements.service";
+import { calculateFundingShortfallCents, calculateLendingLimitGuidance } from "@/services/lending-limits";
 import { getOrganizationSettings } from "@/services/settings.service";
 
 export function LoanFormPage() {
@@ -28,15 +28,17 @@ export function LoanFormPage() {
   const [notes, setNotes] = useState("");
   const [formError, setFormError] = useState("");
   const [isReviewing, setIsReviewing] = useState(false);
+  const [confirmCapitalContribution, setConfirmCapitalContribution] = useState(false);
 
   const { data: clients = [], isLoading } = useQuery({
     queryKey: ["clients"],
     queryFn: listClientsWithBalances,
   });
 
-  const { data: availableCashCents = 0 } = useQuery({
-    queryKey: ["available-cash"],
+  const { data: availableCashCents = 0, isLoading: isCashLoading, error: cashError } = useQuery({
+    queryKey: ["available-cash", organizationId],
     queryFn: getAvailableCashCents,
+    enabled: Boolean(organizationId),
   });
 
   const { data: settings } = useQuery({
@@ -54,6 +56,7 @@ export function LoanFormPage() {
   const interestRateBps = Math.round(Number(interestRate || "0") * 100);
   const cycleRange = useMemo(() => getCycleRange(loanDate), [loanDate]);
   const lendingGuidance = calculateLendingLimitGuidance(availableCashCents, amountCents);
+  const fundingShortfallCents = calculateFundingShortfallCents(availableCashCents, amountCents);
   const riskToneClass = {
     ok: "border-green-200 bg-green-50 text-kredo-green",
     review: "border-yellow-200 bg-yellow-50 text-kredo-yellow",
@@ -62,10 +65,46 @@ export function LoanFormPage() {
   }[lendingGuidance.riskLevel];
 
   const mutation = useMutation({
-    mutationFn: createLoan,
+    mutationFn: async () => {
+      if (!user || !organizationId) {
+        throw new Error("Missing authenticated organization");
+      }
+
+      let contributionId: string | null = null;
+
+      try {
+        if (fundingShortfallCents > 0) {
+          const contribution = await createCapitalContribution({
+            userId: user.id,
+            organizationId,
+            movementDate: loanDate,
+            amountCents: fundingShortfallCents,
+            source: "loan_cash_funding",
+            description: "Aporte de capital confirmado para cubrir el desembolso de un prestamo.",
+          });
+          contributionId = contribution.id;
+        }
+
+        return await createLoan({
+          userId: user.id,
+          organizationId,
+          clientId,
+          loanDate,
+          amountCents,
+          interestRateBps,
+          notes,
+        });
+      } catch (error) {
+        if (contributionId) {
+          await voidCapitalContribution(contributionId, user.id, "Prestamo no creado; aporte revertido automaticamente.").catch(() => undefined);
+        }
+        throw error;
+      }
+    },
     onSuccess: async (loan) => {
       await queryClient.invalidateQueries({ queryKey: ["clients"] });
       await queryClient.invalidateQueries({ queryKey: ["dashboard-summary"] });
+      await queryClient.invalidateQueries({ queryKey: ["available-cash", organizationId] });
       await queryClient.invalidateQueries({ queryKey: ["client", loan.client_id] });
       navigate(`/receipts/loan/${loan.id}`);
     },
@@ -78,6 +117,14 @@ export function LoanFormPage() {
   function validateForm() {
     if (!user || !organizationId) {
       return "Debes iniciar sesion para registrar prestamos.";
+    }
+
+    if (isCashLoading) {
+      return "Espera mientras se verifica la caja disponible.";
+    }
+
+    if (cashError) {
+      return "No se pudo verificar la caja disponible. Refresca la pagina e intenta nuevamente.";
     }
 
     if (!clientId) {
@@ -94,6 +141,10 @@ export function LoanFormPage() {
 
     if (!Number.isFinite(interestRateBps) || interestRateBps < 0 || interestRateBps > 10000) {
       return "El interes debe estar entre 0% y 100%.";
+    }
+
+    if (fundingShortfallCents > 0 && !confirmCapitalContribution) {
+      return `Confirma el aporte de capital por ${formatMoney(fundingShortfallCents)} para cubrir la caja faltante.`;
     }
 
     return "";
@@ -117,15 +168,7 @@ export function LoanFormPage() {
       return;
     }
 
-    mutation.mutate({
-      userId: user.id,
-      organizationId,
-      clientId,
-      loanDate,
-      amountCents,
-      interestRateBps,
-      notes,
-    });
+    mutation.mutate();
   }
 
   return (
@@ -163,6 +206,20 @@ export function LoanFormPage() {
           </p>
           {amountCents > 0 ? <p className="mt-2 font-medium">{lendingGuidance.message}</p> : null}
         </article>
+        {fundingShortfallCents > 0 ? (
+          <label className="flex items-start gap-3 rounded-md border border-yellow-300 bg-yellow-50 px-3 py-3 text-sm">
+            <input
+              checked={confirmCapitalContribution}
+              className="mt-1 h-4 w-4"
+              onChange={(event) => setConfirmCapitalContribution(event.target.checked)}
+              type="checkbox"
+            />
+            <span>
+              <span className="block font-semibold text-kredo-ink">Faltan {formatMoney(fundingShortfallCents)} en caja.</span>
+              Confirmo que este dinero lo aporta el propietario como capital para realizar el prestamo.
+            </span>
+          </label>
+        ) : null}
         <Field
           inputMode="decimal"
           label="Interes (%)"
@@ -200,6 +257,12 @@ export function LoanFormPage() {
                 <dt className="text-kredo-muted">Cliente</dt>
                 <dd className="text-right font-semibold">{selectedClient?.full_name}</dd>
               </div>
+              {fundingShortfallCents > 0 ? (
+                <div className="flex justify-between gap-3">
+                  <dt className="text-kredo-muted">Aporte de capital</dt>
+                  <dd className="font-semibold">{formatMoney(fundingShortfallCents)}</dd>
+                </div>
+              ) : null}
               <div className="flex justify-between gap-3">
                 <dt className="text-kredo-muted">Monto</dt>
                 <dd className="font-semibold">{formatMoney(amountCents)}</dd>

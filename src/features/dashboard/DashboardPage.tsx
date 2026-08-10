@@ -2,12 +2,17 @@ import { Link } from "react-router-dom";
 import { Plus, Search } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { MetricCard } from "@/components/ui/MetricCard";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { formatMoney } from "@/lib/money";
 import { getDashboardSummary } from "@/services/dashboard.service";
 import { calculateLendingLimitGuidance } from "@/services/lending-limits";
+import { createCapitalContribution } from "@/services/financial-movements.service";
+import { useAuth } from "@/features/auth/AuthProvider";
+import { useOrganization } from "@/features/organizations/OrganizationProvider";
+import { toDateInputValue } from "@/lib/dates";
 
 function formatRatio(value: number) {
   return `${value.toFixed(2)}x`;
@@ -20,6 +25,9 @@ function formatPercent(value: number) {
 type SummaryTab = "operation" | "capital" | "profit" | "activity";
 
 export function DashboardPage() {
+  const queryClient = useQueryClient();
+  const { user } = useAuth();
+  const { organizationId } = useOrganization();
   const [searchTerm, setSearchTerm] = useState("");
   const [activeSummaryTab, setActiveSummaryTab] = useState<SummaryTab>("operation");
   const { data, isLoading, error } = useQuery({
@@ -40,6 +48,27 @@ export function DashboardPage() {
     ));
   }, [data?.clients, normalizedSearchTerm]);
   const lendingGuidance = calculateLendingLimitGuidance(data?.availableCashCents ?? 0, 0);
+  const negativeCashCents = Math.max(-(data?.availableCashCents ?? 0), 0);
+  const reconciliationMutation = useMutation({
+    mutationFn: async () => {
+      if (!user || !organizationId || negativeCashCents <= 0) {
+        throw new Error("No hay saldo pendiente por conciliar.");
+      }
+
+      return createCapitalContribution({
+        userId: user.id,
+        organizationId,
+        movementDate: toDateInputValue(),
+        amountCents: negativeCashCents,
+        source: "manual_cash_reconciliation",
+        description: "Aporte de capital confirmado para conciliar caja negativa existente.",
+      });
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["dashboard-summary"] });
+      await queryClient.invalidateQueries({ queryKey: ["available-cash", organizationId] });
+    },
+  });
   const summaryTabs: Array<{ id: SummaryTab; label: string }> = [
     { id: "operation", label: "Operacion" },
     { id: "capital", label: "Capital" },
@@ -82,8 +111,8 @@ export function DashboardPage() {
               />
               <MetricCard
                 label="Limite por persona"
-                value={formatMoney(lendingGuidance.recommendedLimitCents)}
-                helper={`Normal ${formatMoney(lendingGuidance.normalLimitCents)} - Excepcion ${formatMoney(lendingGuidance.exceptionalLimitCents)}`}
+                value={negativeCashCents > 0 ? "No disponible" : formatMoney(lendingGuidance.recommendedLimitCents)}
+                helper={negativeCashCents > 0 ? "Primero concilia la caja negativa." : `Normal ${formatMoney(lendingGuidance.normalLimitCents)} - Excepcion ${formatMoney(lendingGuidance.exceptionalLimitCents)}`}
                 tone="yellow"
               />
               <MetricCard
@@ -177,6 +206,24 @@ export function DashboardPage() {
             </>
           ) : null}
         </div>
+
+        {activeSummaryTab === "operation" && negativeCashCents > 0 ? (
+          <article className="mt-3 rounded-lg border border-red-200 bg-red-50 p-4 text-sm">
+            <p className="font-semibold text-kredo-red">La caja necesita conciliacion</p>
+            <p className="mt-1 text-kredo-muted">
+              Si los {formatMoney(negativeCashCents)} prestados salieron de dinero aportado por el propietario, registra ese aporte para llevar la caja a cero.
+            </p>
+            <button
+              className="mt-3 min-h-11 rounded-md bg-kredo-primary px-4 py-2 font-semibold text-white disabled:opacity-60"
+              disabled={reconciliationMutation.isPending}
+              onClick={() => reconciliationMutation.mutate()}
+              type="button"
+            >
+              {reconciliationMutation.isPending ? "Registrando..." : `Registrar aporte de ${formatMoney(negativeCashCents)}`}
+            </button>
+            {reconciliationMutation.isError ? <p className="mt-2 font-medium text-kredo-red">No se pudo registrar el aporte. Intenta nuevamente.</p> : null}
+          </article>
+        ) : null}
       </div>
 
       <div className="mb-4 flex gap-2">
