@@ -22,6 +22,9 @@ export type FinancialSummary = {
   activePortfolioCents: number;
   availableCashCents: number;
   interestCollectedCents: number;
+  lateFeeIncomeCents: number;
+  expensesCents: number;
+  loanLossCents: number;
   netProfitCents: number;
   loanVolumeCents: number;
   principalRecoveredCents: number;
@@ -74,6 +77,9 @@ export function calculateFinancialSummary(movements: FinancialMovementInput[]): 
     activePortfolioCents,
     availableCashCents,
     interestCollectedCents,
+    lateFeeIncomeCents,
+    expensesCents,
+    loanLossCents,
     netProfitCents,
     loanVolumeCents,
     principalRecoveredCents,

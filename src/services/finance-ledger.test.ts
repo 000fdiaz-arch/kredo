@@ -79,4 +79,23 @@ describe("financial ledger summary", () => {
     expect(summary.capitalWithdrawnCents).toBe(0);
     expect(summary.principalRecoveredCents).toBe(0);
   });
+
+  it("exposes every component needed to explain cash and net profit", () => {
+    const summary = calculateFinancialSummary([
+      movement("capital_contribution", 20_000),
+      movement("loan_disbursement", 12_000),
+      movement("principal_recovery", 3_000),
+      movement("interest_income", 1_500),
+      movement("late_fee_income", 200),
+      movement("expense", 700),
+      movement("loan_loss", 1_000),
+    ]);
+
+    expect(summary.availableCashCents).toBe(12_000);
+    expect(summary.interestCollectedCents).toBe(1_500);
+    expect(summary.lateFeeIncomeCents).toBe(200);
+    expect(summary.expensesCents).toBe(700);
+    expect(summary.loanLossCents).toBe(1_000);
+    expect(summary.netProfitCents).toBe(0);
+  });
 });
