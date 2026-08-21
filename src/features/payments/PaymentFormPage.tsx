@@ -10,6 +10,7 @@ import { isCycleCloseDate, toDateInputValue } from "@/lib/dates";
 import { formatMoney } from "@/lib/money";
 import { listClientsWithBalances } from "@/services/clients.service";
 import { generatePaymentInterestForClient } from "@/services/interest.service";
+import { getClientInterestPolicyStatus } from "@/services/interest-policy.service";
 import { createPayment, type PaymentMethod } from "@/services/payments.service";
 
 const paymentMethods: Array<{ value: PaymentMethod; label: string }> = [
@@ -47,6 +48,11 @@ export function PaymentFormPage() {
   const { data: clients = [], isLoading } = useQuery({
     queryKey: ["clients"],
     queryFn: listClientsWithBalances,
+  });
+  const { data: interestPolicy } = useQuery({
+    queryKey: ["client-interest-policy", clientId, paymentDate],
+    queryFn: () => getClientInterestPolicyStatus(clientId, paymentDate),
+    enabled: Boolean(clientId && paymentDate),
   });
 
   const selectedClient = clients.find((client) => client.id === clientId);
@@ -87,7 +93,7 @@ export function PaymentFormPage() {
     setIsGeneratingInterest(true);
 
     generatePaymentInterestForClient(clientId, paymentDate)
-      .then(async () => {
+      .then(async (created) => {
         await Promise.all([
           queryClient.invalidateQueries({ queryKey: ["clients"] }),
           queryClient.invalidateQueries({ queryKey: ["client", clientId] }),
@@ -95,7 +101,11 @@ export function PaymentFormPage() {
           queryClient.invalidateQueries({ queryKey: ["dashboard-summary"] }),
         ]);
         if (!cancelled) {
-          setInterestMessage("Cargos del cierre generados correctamente.");
+          setInterestMessage(
+            created.length > 0
+              ? "Cargos del cierre generados correctamente."
+              : "No habia cargos nuevos para generar en este cierre.",
+          );
         }
       })
       .catch(() => {
@@ -119,6 +129,11 @@ export function PaymentFormPage() {
   async function handleGenerateCharges() {
     if (!clientId || !paymentDate) {
       setFormError("Selecciona un cliente y la fecha del pago para generar los cargos.");
+      return;
+    }
+
+    if (interestPolicy?.isFrozen) {
+      setInterestMessage("Los intereses de este cliente estan congelados.");
       return;
     }
 
@@ -274,11 +289,11 @@ export function PaymentFormPage() {
           </p>
           <button
             className="mt-3 min-h-11 w-full rounded-md border border-kredo-primary bg-white px-4 py-2 font-semibold text-kredo-primary disabled:cursor-not-allowed disabled:opacity-60"
-            disabled={!clientId || !paymentDate || isGeneratingInterest || mutation.isPending}
+            disabled={!clientId || !paymentDate || isGeneratingInterest || mutation.isPending || interestPolicy?.isFrozen}
             onClick={() => void handleGenerateCharges()}
             type="button"
           >
-            {isGeneratingInterest ? "Generando cargos..." : "Generar cargos"}
+            {isGeneratingInterest ? "Generando cargos..." : interestPolicy?.isFrozen ? "Intereses congelados" : "Generar cargos"}
           </button>
           {interestMessage ? <p className="mt-2 text-sm font-medium text-kredo-green">{interestMessage}</p> : null}
         </div>

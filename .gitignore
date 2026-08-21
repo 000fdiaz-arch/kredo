@@ -7,3 +7,4 @@ dist
 .codex-*.log
 
 .vercel
+supabase/.temp/

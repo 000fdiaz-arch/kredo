@@ -1,6 +1,11 @@
 import { supabase } from "@/lib/supabase";
 import { listDueCycleRanges, toDateInputValue } from "@/lib/dates";
 import { calculateCycleInterest, type InterestLoan, type InterestPayment } from "@/services/interest.service";
+import {
+  isInterestFrozenAt,
+  type InterestFreezeEvent,
+  type InterestRateChange,
+} from "@/services/interest-policy.service";
 import type { Database } from "@/types/database";
 import type { ClientStatus } from "@/types/domain";
 
@@ -62,8 +67,10 @@ type PaymentInterestStatusRow = {
 type ZeroInterestLoanStatusRow = Pick<Database["public"]["Tables"]["loans"]["Row"], "client_id">;
 type LoanInterestStatusRow = Pick<
   Database["public"]["Tables"]["loans"]["Row"],
-  "client_id" | "loan_date" | "principal_amount_cents" | "interest_rate_bps" | "created_at" | "voided_at"
+  "id" | "client_id" | "loan_date" | "principal_amount_cents" | "interest_rate_bps" | "created_at" | "voided_at"
 >;
+type ClientFreezeStatusRow = InterestFreezeEvent & { client_id: string };
+type ClientRateStatusRow = InterestRateChange & { client_id: string };
 
 function calculateDisplayStatus(client: ClientWithBalance, lateInterestCents: number, hasZeroInterestLoan: boolean): ClientStatus {
   if (client.status === "inactive") {
@@ -102,6 +109,8 @@ async function getLateInterestByClient(clientIds: string[]) {
     { data: charges, error: chargesError },
     { data: payments, error: paymentsError },
     { data: loans, error: loansError },
+    { data: freezeEvents, error: freezeEventsError },
+    { data: rateChanges, error: rateChangesError },
   ] = await Promise.all([
     supabase
       .from("interest_charges")
@@ -115,10 +124,18 @@ async function getLateInterestByClient(clientIds: string[]) {
       .is("voided_at", null),
     supabase
       .from("loans")
-      .select("client_id, loan_date, principal_amount_cents, interest_rate_bps, created_at, voided_at")
+      .select("id, client_id, loan_date, principal_amount_cents, interest_rate_bps, created_at, voided_at")
       .in("client_id", clientIds)
       .is("voided_at", null)
       .order("loan_date", { ascending: true }),
+    (supabase as any)
+      .from("client_interest_freeze_events")
+      .select("client_id, action, effective_date, reason, created_at")
+      .in("client_id", clientIds),
+    (supabase as any)
+      .from("loan_interest_rate_changes")
+      .select("client_id, loan_id, effective_date, interest_rate_bps, reason, created_at")
+      .in("client_id", clientIds),
   ]);
 
   if (chargesError) {
@@ -132,6 +149,9 @@ async function getLateInterestByClient(clientIds: string[]) {
   if (loansError) {
     throw loansError;
   }
+
+  if (freezeEventsError) throw freezeEventsError;
+  if (rateChangesError) throw rateChangesError;
 
   const interestCharges = (charges ?? []) as InterestChargeStatusRow[];
   const cycleIds = [...new Set(interestCharges.map((charge) => charge.cycle_id))];
@@ -157,6 +177,20 @@ async function getLateInterestByClient(clientIds: string[]) {
   const loansByClient = new Map<string, LoanInterestStatusRow[]>();
   const paymentsByClient = new Map<string, PaymentInterestStatusRow[]>();
   const paidInterestByClient = new Map<string, number>();
+  const freezeEventsByClient = new Map<string, ClientFreezeStatusRow[]>();
+  const rateChangesByClient = new Map<string, ClientRateStatusRow[]>();
+
+  for (const event of (freezeEvents ?? []) as ClientFreezeStatusRow[]) {
+    const clientEvents = freezeEventsByClient.get(event.client_id) ?? [];
+    clientEvents.push(event);
+    freezeEventsByClient.set(event.client_id, clientEvents);
+  }
+
+  for (const change of (rateChanges ?? []) as ClientRateStatusRow[]) {
+    const clientChanges = rateChangesByClient.get(change.client_id) ?? [];
+    clientChanges.push(change);
+    rateChangesByClient.set(change.client_id, clientChanges);
+  }
 
   for (const charge of interestCharges) {
     const cycle = cyclesById.get(charge.cycle_id);
@@ -202,13 +236,20 @@ async function getLateInterestByClient(clientIds: string[]) {
 
     const generatedDates = generatedCycleEndDatesByClient.get(clientId) ?? new Set<string>();
     const clientPayments = paymentsByClient.get(clientId) ?? [];
+    const clientFreezeEvents = freezeEventsByClient.get(clientId) ?? [];
+    const clientRateChanges = rateChangesByClient.get(clientId) ?? [];
     const ungeneratedLateInterestCents = listDueCycleRanges(firstLoan.loan_date, today)
-      .filter((range) => range.endDate < today && !generatedDates.has(range.endDate))
+      .filter((range) => (
+        range.endDate < today &&
+        !generatedDates.has(range.endDate) &&
+        !isInterestFrozenAt(clientFreezeEvents, range.endDate)
+      ))
       .reduce((total, range) => {
         const interest = calculateCycleInterest(
           clientLoans as InterestLoan[],
           clientPayments as InterestPayment[],
           range.endDate,
+          clientRateChanges,
         );
 
         return total + interest.interestAmountCents;

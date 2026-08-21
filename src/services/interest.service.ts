@@ -1,6 +1,12 @@
 import { getCycleRange, getNextCloseDate, listDueCycleRanges, toDateInputValue } from "@/lib/dates";
 import { supabase } from "@/lib/supabase";
 import { getOrCreateCycle } from "@/services/cycles.service";
+import {
+  getEffectiveInterestRateBps,
+  isInterestFrozenAt,
+  listClientInterestPolicyData,
+  type InterestRateChange,
+} from "@/services/interest-policy.service";
 import type { Database } from "@/types/database";
 
 type LoanRow = Database["public"]["Tables"]["loans"]["Row"];
@@ -9,7 +15,7 @@ type InterestChargeRow = Database["public"]["Tables"]["interest_charges"]["Row"]
 
 export type InterestLoan = Pick<
   LoanRow,
-  "loan_date" | "principal_amount_cents" | "interest_rate_bps" | "created_at" | "voided_at"
+  "id" | "loan_date" | "principal_amount_cents" | "interest_rate_bps" | "created_at" | "voided_at"
 >;
 export type InterestPayment = Pick<PaymentRow, "payment_date" | "principal_amount_cents" | "voided_at">;
 
@@ -26,7 +32,12 @@ export type ClientInterestStatus = {
   nextCloseDate: string;
 };
 
-export function calculateCycleInterest(loans: InterestLoan[], payments: InterestPayment[], endDate: string) {
+export function calculateCycleInterest(
+  loans: InterestLoan[],
+  payments: InterestPayment[],
+  endDate: string,
+  rateChanges: InterestRateChange[] = [],
+) {
   const eligibleLoans = loans
     // A loan granted on closing day starts accruing in the following cycle.
     .filter((loan) => loan.loan_date < endDate && !loan.voided_at)
@@ -41,7 +52,7 @@ export function calculateCycleInterest(loans: InterestLoan[], payments: Interest
 
     return {
       principalAmountCents: loan.principal_amount_cents - principalAppliedCents,
-      interestRateBps: loan.interest_rate_bps,
+      interestRateBps: getEffectiveInterestRateBps(loan, rateChanges, endDate),
     };
   });
   const principalBaseCents = outstandingLoans.reduce((total, loan) => total + loan.principalAmountCents, 0);
@@ -140,10 +151,11 @@ export function listPaymentInterestCycleRanges(startDateValue: string, paymentDa
 }
 
 export async function getClientInterestStatus(clientId: string, asOfDate = toDateInputValue()): Promise<ClientInterestStatus> {
-  const [loans, payments, charges] = await Promise.all([
+  const [loans, payments, charges, policyData] = await Promise.all([
     listClientLoans(clientId),
     listClientPayments(clientId),
     listClientInterestCharges(clientId),
+    listClientInterestPolicyData(clientId),
   ]);
   const firstLoan = loans[0];
 
@@ -167,16 +179,17 @@ export async function getClientInterestStatus(clientId: string, asOfDate = toDat
 
   const dueCycles = cycles
     .map(({ range, cycle }) => {
-      const interest = calculateCycleInterest(loans, payments, range.endDate);
+      const interest = calculateCycleInterest(loans, payments, range.endDate, policyData.rateChanges);
 
       return {
         endDate: range.endDate,
         principalBaseCents: interest.principalBaseCents,
         interestAmountCents: interest.interestAmountCents,
         alreadyGenerated: generatedCycleIds.has(cycle.id),
+        frozen: isInterestFrozenAt(policyData.freezeEvents, range.endDate),
       };
     })
-    .filter((cycle) => cycle.principalBaseCents > 0);
+    .filter((cycle) => cycle.principalBaseCents > 0 && !cycle.frozen);
 
   return {
     dueCycles,
@@ -192,7 +205,11 @@ async function generateInterestForClient(
   asOfDate: string,
   getCycleRanges: (startDateValue: string, asOfDateValue: string) => Array<{ startDate: string; endDate: string }>,
 ): Promise<InterestChargeRow[]> {
-  const [loans, payments] = await Promise.all([listClientLoans(clientId), listClientPayments(clientId)]);
+  const [loans, payments, policyData] = await Promise.all([
+    listClientLoans(clientId),
+    listClientPayments(clientId),
+    listClientInterestPolicyData(clientId),
+  ]);
   const firstLoan = loans[0];
 
   if (!firstLoan) {
@@ -203,6 +220,10 @@ async function generateInterestForClient(
   const created: InterestChargeRow[] = [];
 
   for (const range of cycleRanges) {
+    if (isInterestFrozenAt(policyData.freezeEvents, range.endDate)) {
+      continue;
+    }
+
     const cycle = await getOrCreateCycle(firstLoan.user_id, (firstLoan as any).organization_id, range.endDate);
     const { data: existing, error: lookupError } = await (supabase as any)
       .from("interest_charges")
@@ -220,7 +241,7 @@ async function generateInterestForClient(
       continue;
     }
 
-    const interest = calculateCycleInterest(loans, payments, range.endDate);
+    const interest = calculateCycleInterest(loans, payments, range.endDate, policyData.rateChanges);
 
     if (interest.principalBaseCents <= 0 || interest.interestAmountCents <= 0) {
       continue;

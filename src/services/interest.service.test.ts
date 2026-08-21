@@ -106,6 +106,19 @@ describe("calculateCycleInterest", () => {
 
     expect(interest.interestAmountCents).toBe(2_000);
   });
+
+  it("uses a new rate only from its effective close", () => {
+    const rateChanges = [{
+      loan_id: "loan-id",
+      effective_date: "2026-01-30",
+      interest_rate_bps: 500,
+      created_at: "2026-01-20T12:00:00.000Z",
+    }];
+    const loans = [loan({ loan_date: "2026-01-05", principal_amount_cents: 10_000, interest_rate_bps: 1_000 })];
+
+    expect(calculateCycleInterest(loans, [], "2026-01-15", rateChanges).interestAmountCents).toBe(1_000);
+    expect(calculateCycleInterest(loans, [], "2026-01-30", rateChanges).interestAmountCents).toBe(500);
+  });
 });
 
 describe("listPaymentInterestCycleRanges", () => {
