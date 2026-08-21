@@ -28,7 +28,8 @@ export type ClientInterestStatus = {
 
 export function calculateCycleInterest(loans: InterestLoan[], payments: InterestPayment[], endDate: string) {
   const eligibleLoans = loans
-    .filter((loan) => loan.loan_date <= endDate && !loan.voided_at)
+    // A loan granted on closing day starts accruing in the following cycle.
+    .filter((loan) => loan.loan_date < endDate && !loan.voided_at)
     .sort((a, b) => a.loan_date.localeCompare(b.loan_date) || a.created_at.localeCompare(b.created_at));
   let principalPaidCents = payments
     .filter((payment) => payment.payment_date <= endDate && !payment.voided_at)
@@ -106,17 +107,24 @@ async function listClientInterestCharges(clientId: string) {
   return data ?? [];
 }
 
-async function listClientIdsWithLoans() {
-  const { data, error } = await supabase
+async function listClientIdsWithLoans(organizationId?: string) {
+  let query = (supabase as any)
     .from("loans")
     .select("client_id")
     .is("voided_at", null);
+
+  if (organizationId) {
+    query = query.eq("organization_id", organizationId);
+  }
+
+  const { data, error } = await query;
 
   if (error) {
     throw error;
   }
 
-  return [...new Set((data ?? []).map((loan) => loan.client_id))];
+  const loans = (data ?? []) as Array<{ client_id: string }>;
+  return [...new Set(loans.map((loan) => loan.client_id))];
 }
 
 export function listPaymentInterestCycleRanges(startDateValue: string, paymentDateValue: string) {
@@ -250,8 +258,8 @@ export async function generatePaymentInterestForClient(clientId: string, payment
   return generateInterestForClient(clientId, paymentDate, listPaymentInterestCycleRanges);
 }
 
-export async function generateDueInterestForAllClients(): Promise<InterestChargeRow[]> {
-  const clientIds = await listClientIdsWithLoans();
+export async function generateDueInterestForAllClients(organizationId?: string): Promise<InterestChargeRow[]> {
+  const clientIds = await listClientIdsWithLoans(organizationId);
   const generated = await Promise.all(clientIds.map((clientId) => generateDueInterestForClient(clientId)));
 
   return generated.flat();

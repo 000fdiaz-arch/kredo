@@ -6,7 +6,7 @@ import { Field } from "@/components/ui/Field";
 import { SelectField } from "@/components/ui/SelectField";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { useOrganization } from "@/features/organizations/OrganizationProvider";
-import { toDateInputValue } from "@/lib/dates";
+import { isCycleCloseDate, toDateInputValue } from "@/lib/dates";
 import { formatMoney } from "@/lib/money";
 import { listClientsWithBalances } from "@/services/clients.service";
 import { generatePaymentInterestForClient } from "@/services/interest.service";
@@ -41,6 +41,7 @@ export function PaymentFormPage() {
   const [isReviewing, setIsReviewing] = useState(false);
   const [formError, setFormError] = useState("");
   const [isGeneratingInterest, setIsGeneratingInterest] = useState(false);
+  const [interestMessage, setInterestMessage] = useState("");
   const generatedInterestKeys = useRef(new Set<string>());
 
   const { data: clients = [], isLoading } = useQuery({
@@ -71,7 +72,7 @@ export function PaymentFormPage() {
   }, [interestBalanceCents, principalBalanceCents, totalAmountCents, totalBalanceCents]);
 
   useEffect(() => {
-    if (!clientId || !paymentDate) {
+    if (!clientId || !paymentDate || !isCycleCloseDate(paymentDate)) {
       return;
     }
 
@@ -93,6 +94,9 @@ export function PaymentFormPage() {
           queryClient.invalidateQueries({ queryKey: ["client-interest-status", clientId] }),
           queryClient.invalidateQueries({ queryKey: ["dashboard-summary"] }),
         ]);
+        if (!cancelled) {
+          setInterestMessage("Cargos del cierre generados correctamente.");
+        }
       })
       .catch(() => {
         generatedInterestKeys.current.delete(interestKey);
@@ -111,6 +115,38 @@ export function PaymentFormPage() {
       cancelled = true;
     };
   }, [clientId, paymentDate, queryClient]);
+
+  async function handleGenerateCharges() {
+    if (!clientId || !paymentDate) {
+      setFormError("Selecciona un cliente y la fecha del pago para generar los cargos.");
+      return;
+    }
+
+    setFormError("");
+    setInterestMessage("");
+    setIsGeneratingInterest(true);
+
+    try {
+      const created = await generatePaymentInterestForClient(clientId, paymentDate);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["clients"] }),
+        queryClient.invalidateQueries({ queryKey: ["client", clientId] }),
+        queryClient.invalidateQueries({ queryKey: ["client-interest-status", clientId] }),
+        queryClient.invalidateQueries({ queryKey: ["dashboard-summary"] }),
+      ]);
+      setIsReviewing(false);
+      setOverpaymentConfirmed(false);
+      setInterestMessage(
+        created.length > 0
+          ? `${created.length === 1 ? "Cargo generado" : "Cargos generados"} correctamente.`
+          : "Los cargos de este ciclo ya estaban generados o no hay capital sujeto a interes.",
+      );
+    } catch {
+      setFormError("No se pudieron generar los cargos. Revisa la conexion e intenta otra vez.");
+    } finally {
+      setIsGeneratingInterest(false);
+    }
+  }
 
   const mutation = useMutation({
     mutationFn: createPayment,
@@ -207,6 +243,7 @@ export function PaymentFormPage() {
           label="Cliente"
           onChange={(event) => {
             setClientId(event.target.value);
+            setInterestMessage("");
             setIsReviewing(false);
             setOverpaymentConfirmed(false);
           }}
@@ -224,12 +261,27 @@ export function PaymentFormPage() {
           label="Fecha"
           onChange={(event) => {
             setPaymentDate(event.target.value);
+            setInterestMessage("");
             setIsReviewing(false);
             setOverpaymentConfirmed(false);
           }}
           type="date"
           value={paymentDate}
         />
+        <div className="rounded-lg border border-kredo-line bg-kredo-surface p-4">
+          <p className="text-sm text-kredo-muted">
+            Los cargos se generan automaticamente los dias 15 y 30. Si cobras en otra fecha, generalos antes de registrar el pago.
+          </p>
+          <button
+            className="mt-3 min-h-11 w-full rounded-md border border-kredo-primary bg-white px-4 py-2 font-semibold text-kredo-primary disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={!clientId || !paymentDate || isGeneratingInterest || mutation.isPending}
+            onClick={() => void handleGenerateCharges()}
+            type="button"
+          >
+            {isGeneratingInterest ? "Generando cargos..." : "Generar cargos"}
+          </button>
+          {interestMessage ? <p className="mt-2 text-sm font-medium text-kredo-green">{interestMessage}</p> : null}
+        </div>
         <Field
           inputMode="decimal"
           label="Monto pagado"

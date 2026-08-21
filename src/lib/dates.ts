@@ -46,6 +46,10 @@ export function getNextCloseDate(fromDateValue = toDateInputValue()) {
   return getNextCycleRange(fromDateValue).endDate;
 }
 
+export function isCycleCloseDate(dateValue: string) {
+  return getCycleRange(dateValue).endDate === dateValue;
+}
+
 export function listDueCycleRanges(startDateValue: string, asOfDateValue = toDateInputValue()) {
   const cycles: Array<{ startDate: string; endDate: string }> = [];
   let current = getCycleRange(startDateValue);

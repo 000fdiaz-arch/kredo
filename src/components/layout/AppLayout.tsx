@@ -1,8 +1,12 @@
 import { LogOut, Menu, Users, WalletCards, ReceiptText, BarChart3, MoreHorizontal } from "lucide-react";
+import { useEffect, useRef } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { NavLink, Outlet } from "react-router-dom";
 import { clsx } from "clsx";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { useOrganization } from "@/features/organizations/OrganizationProvider";
+import { isCycleCloseDate, toDateInputValue } from "@/lib/dates";
+import { generateDueInterestForAllClients } from "@/services/interest.service";
 
 const primaryNavItems = [
   { label: "Inicio", to: "/dashboard", icon: BarChart3 },
@@ -13,8 +17,34 @@ const primaryNavItems = [
 ];
 
 export function AppLayout() {
+  const queryClient = useQueryClient();
   const { user, signOut } = useAuth();
-  const { organization } = useOrganization();
+  const { organization, organizationId } = useOrganization();
+  const generatedCloseKeys = useRef(new Set<string>());
+
+  useEffect(() => {
+    const today = toDateInputValue();
+    const closeKey = `${organizationId}:${today}`;
+
+    if (!organizationId || !isCycleCloseDate(today) || generatedCloseKeys.current.has(closeKey)) {
+      return;
+    }
+
+    generatedCloseKeys.current.add(closeKey);
+    generateDueInterestForAllClients(organizationId)
+      .then(async () => {
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: ["clients"] }),
+          queryClient.invalidateQueries({ queryKey: ["client"] }),
+          queryClient.invalidateQueries({ queryKey: ["client-interest-status"] }),
+          queryClient.invalidateQueries({ queryKey: ["client-movements"] }),
+          queryClient.invalidateQueries({ queryKey: ["dashboard-summary"] }),
+        ]);
+      })
+      .catch(() => {
+        generatedCloseKeys.current.delete(closeKey);
+      });
+  }, [organizationId, queryClient]);
 
   return (
     <div className="min-h-screen bg-kredo-surface text-kredo-ink">

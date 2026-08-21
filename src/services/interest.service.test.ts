@@ -70,9 +70,64 @@ describe("calculateCycleInterest", () => {
     expect(interest.principalBaseCents).toBe(20_000);
     expect(interest.interestAmountCents).toBe(2_000);
   });
+
+  it("charges a loan granted on January 5 at the January 15 close", () => {
+    const interest = calculateCycleInterest(
+      [loan({ loan_date: "2026-01-05", principal_amount_cents: 10_000, interest_rate_bps: 1_000 })],
+      [],
+      "2026-01-15",
+    );
+
+    expect(interest.interestAmountCents).toBe(1_000);
+  });
+
+  it("does not charge a loan granted on closing day until the following close", () => {
+    const january15 = calculateCycleInterest(
+      [loan({ loan_date: "2026-01-15", principal_amount_cents: 5_500, interest_rate_bps: 1_000 })],
+      [],
+      "2026-01-15",
+    );
+    const january30 = calculateCycleInterest(
+      [loan({ loan_date: "2026-01-15", principal_amount_cents: 5_500, interest_rate_bps: 1_000 })],
+      [],
+      "2026-01-30",
+    );
+
+    expect(january15.interestAmountCents).toBe(0);
+    expect(january30.interestAmountCents).toBe(550);
+  });
+
+  it("charges a loan granted on January 16 at the January 30 close", () => {
+    const interest = calculateCycleInterest(
+      [loan({ loan_date: "2026-01-16", principal_amount_cents: 20_000, interest_rate_bps: 1_000 })],
+      [],
+      "2026-01-30",
+    );
+
+    expect(interest.interestAmountCents).toBe(2_000);
+  });
 });
 
 describe("listPaymentInterestCycleRanges", () => {
+  it("prepares the January 15 charge for a manual payment on January 10", () => {
+    expect(listPaymentInterestCycleRanges("2026-01-05", "2026-01-10")).toEqual([
+      { startDate: "2026-01-01", endDate: "2026-01-15" },
+    ]);
+  });
+
+  it("moves a loan from January 15 to the January 30 close", () => {
+    expect(listPaymentInterestCycleRanges("2026-01-15", "2026-01-30")).toEqual([
+      { startDate: "2026-01-01", endDate: "2026-01-15" },
+      { startDate: "2026-01-16", endDate: "2026-01-30" },
+    ]);
+  });
+
+  it("uses the January 30 close for a loan granted on January 16", () => {
+    expect(listPaymentInterestCycleRanges("2026-01-16", "2026-01-30")).toEqual([
+      { startDate: "2026-01-16", endDate: "2026-01-30" },
+    ]);
+  });
+
   it("includes the payment cycle even before the close date", () => {
     expect(listPaymentInterestCycleRanges("2026-08-01", "2026-08-06")).toEqual([
       { startDate: "2026-08-01", endDate: "2026-08-15" },
