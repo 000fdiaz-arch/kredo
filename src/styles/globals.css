@@ -34,3 +34,40 @@ textarea {
 .safe-bottom {
   padding-bottom: max(1rem, env(safe-area-inset-bottom));
 }
+
+@keyframes kredo-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.kredo-rise {
+  animation: kredo-rise 420ms ease-out both;
+}
+
+.kredo-rise-delay-1 {
+  animation-delay: 80ms;
+}
+
+.kredo-rise-delay-2 {
+  animation-delay: 150ms;
+}
+
+.kredo-bar {
+  transition: width 700ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kredo-rise {
+    animation: none;
+  }
+
+  .kredo-bar {
+    transition: none;
+  }
+}

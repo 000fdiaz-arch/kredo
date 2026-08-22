@@ -26,6 +26,12 @@ export type FinancialIndicators = ReturnType<typeof calculateFinancialSummary> &
   interestGeneratedCents: number;
   retainedEquityCents: number;
   cycleCapitalRotation: number;
+  cycleExpensesCents: number;
+  cycleLateFeeIncomeCents: number;
+  cycleLoanLossCents: number;
+  cycleNetProfitCents: number;
+  cycleProfitWithdrawnCents: number;
+  totalProfitWithdrawnCents: number;
 };
 
 export type CreateCapitalContributionInput = {
@@ -35,6 +41,33 @@ export type CreateCapitalContributionInput = {
   amountCents: number;
   source: "loan_cash_funding" | "manual_cash_reconciliation";
   description: string;
+};
+
+export type CreateProfitWithdrawalInput = {
+  userId: string;
+  organizationId: string;
+  movementDate: string;
+  amountCents: number;
+};
+
+export type CycleProfitSummary = {
+  endDate: string;
+  expensesCents: number;
+  interestCollectedCents: number;
+  lateFeeIncomeCents: number;
+  loanLossCents: number;
+  netProfitCents: number;
+  profitWithdrawnCents: number;
+  sources: CycleProfitSource[];
+  startDate: string;
+};
+
+export type CycleProfitSource = {
+  amountCents: number;
+  date: string;
+  direction: "deduction" | "income";
+  id: string;
+  label: string;
 };
 
 type InterestChargeAmountRow = {
@@ -249,6 +282,12 @@ export async function getFinancialIndicators(activePortfolioCents: number): Prom
     (movement) => movement.movement_date >= cycleRange.startDate && movement.movement_date <= cycleRange.endDate,
   );
   const cycleSummary = calculateFinancialSummary(cycleMovements);
+  const cycleProfitWithdrawnCents = cycleMovements
+    .filter((movement) => movement.movement_type === "capital_withdrawal" && movement.source === "profit_withdrawal")
+    .reduce((total, movement) => total + movement.amount_cents, 0);
+  const totalProfitWithdrawnCents = movements
+    .filter((movement) => movement.movement_type === "capital_withdrawal" && movement.source === "profit_withdrawal")
+    .reduce((total, movement) => total + movement.amount_cents, 0);
   const retainedEquityCents = summary.availableCashCents + activePortfolioCents;
   const cycleCapitalRotation =
     summary.netContributedCapitalCents > 0 ? cycleSummary.loanVolumeCents / summary.netContributedCapitalCents : 0;
@@ -264,12 +303,90 @@ export async function getFinancialIndicators(activePortfolioCents: number): Prom
     interestGeneratedCents,
     retainedEquityCents,
     cycleCapitalRotation,
+    cycleExpensesCents: cycleSummary.expensesCents,
+    cycleLateFeeIncomeCents: cycleSummary.lateFeeIncomeCents,
+    cycleLoanLossCents: cycleSummary.loanLossCents,
+    cycleNetProfitCents: cycleSummary.netProfitCents,
+    cycleProfitWithdrawnCents,
+    totalProfitWithdrawnCents,
   };
 }
 
 export async function getAvailableCashCents() {
   const movements = await listFinancialMovements();
   return calculateFinancialSummary(movements).availableCashCents;
+}
+
+export async function listCycleProfitSummaries(): Promise<CycleProfitSummary[]> {
+  const movements = await listFinancialMovements();
+  const profitMovements = movements.filter((movement) => ["interest_income", "late_fee_income", "expense", "loan_loss"].includes(movement.movement_type));
+  const clientIds = [...new Set(profitMovements.map((movement) => movement.client_id).filter((id): id is string => Boolean(id)))];
+  const clientNames = new Map<string, string>();
+
+  if (clientIds.length > 0) {
+    const { data: clients, error } = await (supabase as any)
+      .from("clients")
+      .select("id, full_name")
+      .in("id", clientIds);
+
+    if (error) throw error;
+    for (const client of clients ?? []) clientNames.set(client.id, client.full_name);
+  }
+
+  const currentRange = getCycleRange(toDateInputValue());
+  const ranges = new Map<string, { startDate: string; endDate: string }>([
+    [currentRange.startDate, currentRange],
+  ]);
+
+  for (const movement of movements) {
+    const range = getCycleRange(movement.movement_date);
+    ranges.set(range.startDate, range);
+  }
+
+  return [...ranges.values()]
+    .map((range) => {
+      const cycleMovements = movements.filter(
+        (movement) => movement.movement_date >= range.startDate && movement.movement_date <= range.endDate,
+      );
+      const summary = calculateFinancialSummary(cycleMovements);
+      const profitWithdrawnCents = cycleMovements
+        .filter((movement) => movement.movement_type === "capital_withdrawal" && movement.source === "profit_withdrawal")
+        .reduce((total, movement) => total + movement.amount_cents, 0);
+      const sources = cycleMovements
+        .filter((movement) => ["interest_income", "late_fee_income", "expense", "loan_loss"].includes(movement.movement_type))
+        .map((movement): CycleProfitSource => {
+          const clientName = movement.client_id ? clientNames.get(movement.client_id) : undefined;
+          const defaultLabels: Partial<Record<FinancialMovementType, string>> = {
+            interest_income: "Interés cobrado",
+            late_fee_income: "Mora cobrada",
+            expense: "Gasto",
+            loan_loss: "Pérdida",
+          };
+          const baseLabel = defaultLabels[movement.movement_type] ?? "Movimiento";
+
+          return {
+            id: movement.id,
+            date: movement.movement_date,
+            label: clientName ? `${baseLabel} · ${clientName}` : movement.description || baseLabel,
+            amountCents: movement.amount_cents,
+            direction: ["interest_income", "late_fee_income"].includes(movement.movement_type) ? "income" : "deduction",
+          };
+        })
+        .sort((first, second) => second.date.localeCompare(first.date) || first.label.localeCompare(second.label));
+
+      return {
+        startDate: range.startDate,
+        endDate: range.endDate,
+        interestCollectedCents: summary.interestCollectedCents,
+        lateFeeIncomeCents: summary.lateFeeIncomeCents,
+        expensesCents: summary.expensesCents,
+        loanLossCents: summary.loanLossCents,
+        netProfitCents: summary.netProfitCents,
+        profitWithdrawnCents,
+        sources,
+      };
+    })
+    .sort((first, second) => second.startDate.localeCompare(first.startDate));
 }
 
 export async function createCapitalContribution(input: CreateCapitalContributionInput): Promise<FinancialMovementRow> {
@@ -287,6 +404,45 @@ export async function createCapitalContribution(input: CreateCapitalContribution
       amount_cents: input.amountCents,
       source: input.source,
       description: input.description,
+      created_by: input.userId,
+    })
+    .select("*")
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  return asFinancialMovement(data);
+}
+
+export async function createProfitWithdrawal(input: CreateProfitWithdrawalInput): Promise<FinancialMovementRow> {
+  if (!Number.isInteger(input.amountCents) || input.amountCents <= 0) {
+    throw new Error("El retiro debe ser mayor que cero.");
+  }
+
+  const movements = await listFinancialMovements();
+  const summary = calculateFinancialSummary(movements);
+  const profitWithdrawnCents = movements
+    .filter((movement) => movement.movement_type === "capital_withdrawal" && movement.source === "profit_withdrawal")
+    .reduce((total, movement) => total + movement.amount_cents, 0);
+  const remainingProfitCents = Math.max(summary.netProfitCents - profitWithdrawnCents, 0);
+  const withdrawableCents = Math.min(remainingProfitCents, Math.max(summary.availableCashCents, 0));
+
+  if (input.amountCents > withdrawableCents) {
+    throw new Error("El monto supera la utilidad disponible para retirar.");
+  }
+
+  const { data, error } = await (supabase as any)
+    .from("financial_movements")
+    .insert({
+      user_id: input.userId,
+      organization_id: input.organizationId,
+      movement_date: input.movementDate,
+      movement_type: "capital_withdrawal",
+      amount_cents: input.amountCents,
+      source: "profit_withdrawal",
+      description: "Retiro de utilidad acumulada.",
       created_by: input.userId,
     })
     .select("*")

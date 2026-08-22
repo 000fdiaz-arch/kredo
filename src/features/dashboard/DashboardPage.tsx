@@ -1,568 +1,610 @@
-import { Link } from "react-router-dom";
-import { Plus, Search } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { MetricCard } from "@/components/ui/MetricCard";
+import { useEffect, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Banknote, CalendarRange, ChevronDown, ChevronRight, HandCoins, TrendingUp, Wallet, X } from "lucide-react";
 import { MetricDetailsModal, type MetricDetail } from "@/components/ui/MetricDetailsModal";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import { formatMoney } from "@/lib/money";
-import { getDashboardSummary } from "@/services/dashboard.service";
-import { calculateLendingLimitGuidance } from "@/services/lending-limits";
-import { createCapitalContribution } from "@/services/financial-movements.service";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { useOrganization } from "@/features/organizations/OrganizationProvider";
 import { toDateInputValue } from "@/lib/dates";
-
-function formatRatio(value: number) {
-  return `${value.toFixed(2)}x`;
-}
-
-function formatPercent(value: number) {
-  return `${Math.round(value * 100)}%`;
-}
-
-type SummaryTab = "operation" | "capital" | "profit" | "activity";
-type MetricKey =
-  | "availableCash"
-  | "lendingLimit"
-  | "capitalLent"
-  | "activeClients"
-  | "nextClose"
-  | "capitalContributed"
-  | "capitalWithdrawn"
-  | "totalPortfolio"
-  | "capitalRotation"
-  | "interestCollected"
-  | "netProfit"
-  | "interestGenerated"
-  | "pendingInterest"
-  | "cyclePayments"
-  | "cyclePrincipal"
-  | "cycleLoans"
-  | "historicalLoans";
+import { formatMoney } from "@/lib/money";
+import { getDashboardSummary } from "@/services/dashboard.service";
+import {
+  createProfitWithdrawal,
+  listCycleProfitSummaries,
+  type CycleProfitSummary,
+} from "@/services/financial-movements.service";
 
 type DashboardData = Awaited<ReturnType<typeof getDashboardSummary>>;
+type MetricKey = "total" | "lent" | "cash" | "profit";
 
-function clientBalanceRows(data: DashboardData | undefined, field: "principal_balance_cents" | "interest_balance_cents") {
-  return (data?.clients ?? [])
-    .filter((client) => (client.balance?.[field] ?? 0) > 0)
-    .map((client) => ({ label: client.full_name, value: formatMoney(client.balance?.[field] ?? 0) }));
+type AnimatedMoneyProps = {
+  className: string;
+  value: number;
+};
+
+function AnimatedMoney({ className, value }: AnimatedMoneyProps) {
+  const [displayValue, setDisplayValue] = useState(0);
+
+  useEffect(() => {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      setDisplayValue(value);
+      return;
+    }
+
+    const duration = 700;
+    const startedAt = performance.now();
+    let animationFrame = 0;
+
+    const update = (now: number) => {
+      const progress = Math.min((now - startedAt) / duration, 1);
+      const easedProgress = 1 - Math.pow(1 - progress, 3);
+      setDisplayValue(Math.round(value * easedProgress));
+
+      if (progress < 1) animationFrame = requestAnimationFrame(update);
+    };
+
+    animationFrame = requestAnimationFrame(update);
+    return () => cancelAnimationFrame(animationFrame);
+  }, [value]);
+
+  return <p className={className}>{formatMoney(displayValue)}</p>;
 }
 
-function buildMetricDetail(key: MetricKey, data: DashboardData | undefined): MetricDetail {
-  const money = (value?: number) => formatMoney(value ?? 0);
-  const availableCashCents = data?.availableCashCents ?? 0;
-  const guidance = calculateLendingLimitGuidance(availableCashCents, 0);
-
-  switch (key) {
-    case "availableCash":
-      return {
-        title: "Dinero disponible",
-        value: money(availableCashCents),
-        description: "Es el efectivo que queda sin prestar despues de sumar todas las entradas y restar todas las salidas.",
-        formula: "Aportes + capital recuperado + intereses + mora - prestamos - retiros - gastos",
-        rows: [
-          { label: "+ Aportes de capital", value: money(data?.capitalContributedCents) },
-          { label: "+ Capital recuperado", value: money(data?.principalRecoveredCents) },
-          { label: "+ Intereses cobrados", value: money(data?.interestCollectedCents) },
-          { label: "+ Mora cobrada", value: money(data?.lateFeeIncomeCents) },
-          { label: "- Prestamos desembolsados", value: money(data?.historicalLoanVolumeCents) },
-          { label: "- Capital retirado", value: money(data?.capitalWithdrawnCents) },
-          { label: "- Gastos", value: money(data?.expensesCents) },
-        ],
-        note: "El resultado de estas entradas y salidas es el dinero disponible mostrado arriba.",
-        action: { label: "Ver historial de movimientos", to: "/history" },
-      };
-    case "lendingLimit":
-      return {
-        title: "Limite por persona",
-        value: availableCashCents < 0 ? "No disponible" : money(guidance.recommendedLimitCents),
-        description: "Es una guia para evitar concentrar demasiado dinero en una sola persona.",
-        formula: "Limite recomendado = 15% del dinero disponible",
-        rows: [
-          { label: "Dinero disponible", value: money(availableCashCents) },
-          { label: "Normal (10%)", value: money(guidance.normalLimitCents) },
-          { label: "Recomendado (15%)", value: money(guidance.recommendedLimitCents) },
-          { label: "Excepcion (20%)", value: money(guidance.exceptionalLimitCents) },
-        ],
-      };
-    case "capitalLent":
-      return {
-        title: "Dinero actualmente prestado",
-        value: money(data?.capitalLentCents),
-        description: "Es el capital que los clientes todavia deben. No incluye los intereses pendientes.",
-        formula: "Suma del capital pendiente de todos los clientes",
-        rows: clientBalanceRows(data, "principal_balance_cents"),
-        note: "Cada pago aplicado a capital reduce este total.",
-        action: { label: "Ver cartera por cliente", to: "/clients" },
-      };
-    case "activeClients": {
-      const clients = data?.clients ?? [];
-      return {
-        title: "Clientes activos",
-        value: `${data?.activeClientCount ?? 0}`,
-        description: "Clientes habilitados para operar, tengan o no un saldo pendiente.",
-        rows: [
-          { label: "Al corriente", value: `${clients.filter((client) => client.status === "current").length}` },
-          { label: "Interes pendiente", value: `${clients.filter((client) => client.status === "interest_pending").length}` },
-          { label: "Con atraso", value: `${data?.lateClientCount ?? 0}` },
-          { label: "Sin movimientos", value: `${clients.filter((client) => client.status === "no_movements").length}` },
-        ],
-        action: { label: "Ver clientes", to: "/clients" },
-      };
-    }
-    case "nextClose":
-      return {
-        title: "Proximo cierre",
-        value: data?.nextCloseDate ?? "Cargando",
-        description: "Fecha en que termina el ciclo actual y se revisan pagos, saldos e intereses.",
-        rows: [
-          { label: "Inicio del ciclo", value: data?.cyclePaymentStartDate ?? "-" },
-          { label: "Fin del ciclo", value: data?.cyclePaymentEndDate ?? "-" },
-          { label: "Proximo cierre", value: data?.nextCloseDate ?? "-" },
-        ],
-        action: { label: "Ver ciclos", to: "/cycles" },
-      };
-    case "capitalContributed":
-      return {
-        title: "Capital propio aportado",
-        value: money(data?.capitalContributedCents),
-        description: "Todo el dinero que el propietario ha ingresado para financiar la operacion.",
-        rows: [
-          { label: "Aportes acumulados", value: money(data?.capitalContributedCents) },
-          { label: "Retiros acumulados", value: money(data?.capitalWithdrawnCents) },
-          { label: "Capital neto aportado", value: money(data?.netContributedCapitalCents) },
-        ],
-        action: { label: "Ver historial de movimientos", to: "/history" },
-      };
-    case "capitalWithdrawn":
-      return {
-        title: "Capital retirado",
-        value: money(data?.capitalWithdrawnCents),
-        description: "Dinero que el propietario ha sacado de la operacion.",
-        rows: [
-          { label: "Capital aportado", value: money(data?.capitalContributedCents) },
-          { label: "Capital retirado", value: money(data?.capitalWithdrawnCents) },
-          { label: "Capital neto aportado", value: money(data?.netContributedCapitalCents) },
-        ],
-        action: { label: "Ver historial de movimientos", to: "/history" },
-      };
-    case "totalPortfolio":
-      return {
-        title: "Total cartera",
-        value: money(data?.totalPortfolioCents),
-        description: "Todo lo pendiente de cobrar a los clientes, incluyendo capital e intereses.",
-        formula: "Capital pendiente + intereses pendientes",
-        rows: [
-          { label: "Capital pendiente", value: money(data?.capitalLentCents) },
-          { label: "Intereses pendientes", value: money(data?.pendingInterestCents) },
-        ],
-        action: { label: "Ver cartera por cliente", to: "/clients" },
-      };
-    case "capitalRotation":
-      return {
-        title: "Rotacion del capital",
-        value: formatRatio(data?.cycleCapitalRotation ?? 0),
-        description: "Indica cuantas veces el capital neto aportado se ha colocado en prestamos durante el ciclo.",
-        formula: "Prestamos del ciclo / capital neto aportado",
-        rows: [
-          { label: "Prestamos del ciclo", value: money(data?.cycleLoanVolumeCents) },
-          { label: "Capital neto aportado", value: money(data?.netContributedCapitalCents) },
-        ],
-      };
-    case "interestCollected":
-      return {
-        title: "Intereses cobrados",
-        value: money(data?.interestCollectedCents),
-        description: "Intereses que ya fueron recibidos en pagos reales.",
-        rows: [{ label: "Intereses cobrados historicos", value: money(data?.interestCollectedCents) }],
-        action: { label: "Ver historial de movimientos", to: "/history" },
-      };
-    case "netProfit":
-      return {
-        title: "Ganancia neta",
-        value: money(data?.netProfitCents),
-        description: "Lo ganado despues de restar gastos y perdidas a los ingresos cobrados.",
-        formula: "Intereses + mora - gastos - perdidas",
-        rows: [
-          { label: "+ Intereses cobrados", value: money(data?.interestCollectedCents) },
-          { label: "+ Mora cobrada", value: money(data?.lateFeeIncomeCents) },
-          { label: "- Gastos", value: money(data?.expensesCents) },
-          { label: "- Perdidas", value: money(data?.loanLossCents) },
-        ],
-      };
-    case "interestGenerated":
-      return {
-        title: "Interes generado",
-        value: money(data?.interestGeneratedCents),
-        description: "Interes causado por los prestamos, se haya cobrado o no.",
-        rows: [
-          { label: "Interes generado", value: money(data?.interestGeneratedCents) },
-          { label: "Interes cobrado", value: money(data?.interestCollectedCents) },
-          { label: "Interes pendiente actual", value: money(data?.pendingInterestCents) },
-        ],
-      };
-    case "pendingInterest":
-      return {
-        title: "Interes pendiente",
-        value: money(data?.pendingInterestCents),
-        description: "Interes generado que los clientes todavia no han pagado.",
-        formula: "Suma del interes pendiente de todos los clientes",
-        rows: clientBalanceRows(data, "interest_balance_cents"),
-        action: { label: "Ver cartera por cliente", to: "/clients" },
-      };
-    case "cyclePayments":
-      return {
-        title: "Pagos del ciclo",
-        value: money(data?.cyclePaymentsCents),
-        description: `Pagos recibidos entre ${data?.cyclePaymentStartDate ?? "-"} y ${data?.cyclePaymentEndDate ?? "-"}.`,
-        formula: "Capital recuperado + intereses cobrados",
-        rows: [
-          { label: "Capital recuperado", value: money(data?.cyclePrincipalRecoveredCents) },
-          { label: "Intereses cobrados", value: money(data?.cycleInterestCollectedCents) },
-        ],
-        action: { label: "Ver pagos del ciclo", to: "/cycles/payments" },
-      };
-    case "cyclePrincipal":
-      return {
-        title: "Capital recuperado del ciclo",
-        value: money(data?.cyclePrincipalRecoveredCents),
-        description: "Parte de los pagos del ciclo que redujo el capital adeudado por los clientes.",
-        rows: [
-          { label: "Capital recuperado", value: money(data?.cyclePrincipalRecoveredCents) },
-          { label: "Intereses cobrados", value: money(data?.cycleInterestCollectedCents) },
-          { label: "Pagos totales", value: money(data?.cyclePaymentsCents) },
-        ],
-        action: { label: "Ver pagos del ciclo", to: "/cycles/payments" },
-      };
-    case "cycleLoans":
-      return {
-        title: "Total desembolsado del ciclo",
-        value: money(data?.cycleLoanVolumeCents),
-        description: "Suma de todos los prestamos entregados durante el ciclo actual, aunque el dinero recuperado se haya vuelto a prestar.",
-        rows: [{ label: "Prestamos del ciclo", value: money(data?.cycleLoanVolumeCents) }],
-        action: { label: "Ver historial de movimientos", to: "/history" },
-      };
-    case "historicalLoans":
-      return {
-        title: "Control historico",
-        value: money(data?.historicalLoanVolumeCents),
-        description: "Volumen total prestado desde el inicio de los registros.",
-        rows: [
-          { label: "Total desembolsado", value: money(data?.historicalLoanVolumeCents) },
-          { label: "Capital recuperado", value: money(data?.principalRecoveredCents) },
-          { label: "Prestamos registrados", value: `${data?.loanCount ?? 0}` },
-          { label: "Tasa de recuperacion", value: formatPercent(data?.recoveryRate ?? 0) },
-        ],
-        action: { label: "Ver historial de movimientos", to: "/history" },
-      };
+function buildMetricDetail(metric: MetricKey, data: DashboardData): MetricDetail {
+  if (metric === "total") {
+    return {
+      title: "Dinero total",
+      value: formatMoney(data.retainedEquityCents),
+      description: "Es todo el dinero de Kredo, esté disponible o prestado a clientes.",
+      formula: "Dinero prestado + dinero en caja",
+      rows: [
+        { label: "Dinero prestado", value: formatMoney(data.capitalLentCents) },
+        { label: "+ Dinero en caja", value: formatMoney(data.availableCashCents) },
+        { label: "= Dinero total", value: formatMoney(data.retainedEquityCents) },
+      ],
+    };
   }
+
+  if (metric === "lent") {
+    const clientRows = data.clients
+      .filter((client) => (client.balance?.principal_balance_cents ?? 0) > 0)
+      .map((client) => ({
+        label: client.full_name,
+        value: formatMoney(client.balance?.principal_balance_cents ?? 0),
+      }));
+
+    return {
+      title: "Dinero prestado",
+      value: formatMoney(data.capitalLentCents),
+      description: "Es el capital que los clientes todavía deben. No incluye intereses.",
+      formula: "Suma del capital pendiente de todos los clientes",
+      rows: clientRows.length > 0 ? clientRows : [{ label: "Capital pendiente", value: formatMoney(0) }],
+      action: { label: "Ver clientes", to: "/clients" },
+    };
+  }
+
+  if (metric === "profit") {
+    return {
+      title: "Ganancia del ciclo",
+      value: formatMoney(data.cycleNetProfitCents),
+      description: `Es la ganancia obtenida del ${data.cyclePaymentStartDate} al ${data.cyclePaymentEndDate}.`,
+      formula: "Intereses + mora - gastos - pérdidas",
+      rows: [
+        { label: "+ Intereses cobrados", value: formatMoney(data.cycleInterestCollectedCents) },
+        { label: "+ Mora cobrada", value: formatMoney(data.cycleLateFeeIncomeCents) },
+        { label: "- Gastos", value: formatMoney(data.cycleExpensesCents) },
+        { label: "- Pérdidas", value: formatMoney(data.cycleLoanLossCents) },
+        { label: "= Ganancia del ciclo", value: formatMoney(data.cycleNetProfitCents) },
+      ],
+      note: data.cycleProfitWithdrawnCents > 0
+        ? `Durante este ciclo se registraron retiros de utilidad por ${formatMoney(data.cycleProfitWithdrawnCents)}.`
+        : "Durante este ciclo no se registraron retiros de utilidad.",
+    };
+  }
+
+  return {
+    title: "Dinero en caja",
+    value: formatMoney(data.availableCashCents),
+    description: "Es el dinero disponible después de registrar todas las entradas y salidas.",
+    formula: "Entradas de dinero - salidas de dinero",
+    rows: [
+      { label: "+ Aportes de capital", value: formatMoney(data.capitalContributedCents) },
+      { label: "+ Capital recuperado", value: formatMoney(data.principalRecoveredCents) },
+      { label: "+ Intereses cobrados", value: formatMoney(data.interestCollectedCents) },
+      { label: "+ Mora cobrada", value: formatMoney(data.lateFeeIncomeCents) },
+      { label: "- Préstamos entregados", value: formatMoney(data.historicalLoanVolumeCents) },
+      { label: "- Capital retirado", value: formatMoney(data.capitalWithdrawnCents) },
+      { label: "- Gastos", value: formatMoney(data.expensesCents) },
+      { label: "= Dinero en caja", value: formatMoney(data.availableCashCents) },
+    ],
+    action: { label: "Ver movimientos", to: "/history" },
+  };
+}
+
+type ProfitWithdrawalModalProps = {
+  accumulatedProfitCents: number;
+  availableCents: number;
+  cashCents: number;
+  cycles: CycleProfitSummary[];
+  cyclesError: boolean;
+  cyclesLoading: boolean;
+  errorMessage?: string;
+  isPending: boolean;
+  onClose: () => void;
+  onSubmit: (amountCents: number) => void;
+  withdrawnCents: number;
+};
+
+function ProfitWithdrawalModal({ accumulatedProfitCents, availableCents, cashCents, cycles, cyclesError, cyclesLoading, errorMessage, isPending, onClose, onSubmit, withdrawnCents }: ProfitWithdrawalModalProps) {
+  const [amount, setAmount] = useState("");
+  const amountCents = Math.round(Number(amount || "0") * 100);
+  const invalidAmount = !Number.isFinite(amountCents) || amountCents <= 0 || amountCents > availableCents;
+  const remainingProfitCents = Math.max(accumulatedProfitCents - withdrawnCents, 0);
+  const projectedProfitCents = remainingProfitCents - (Number.isFinite(amountCents) ? amountCents : 0);
+  const projectedCashCents = cashCents - (Number.isFinite(amountCents) ? amountCents : 0);
+  const setPercentage = (percentage: number) => {
+    setAmount((Math.round(availableCents * percentage) / 100).toFixed(2));
+  };
+
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !isPending) onClose();
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isPending, onClose]);
+
+  return (
+    <div
+      aria-label="Retirar utilidad"
+      aria-modal="true"
+      className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/50 sm:items-center sm:p-4"
+      onClick={() => { if (!isPending) onClose(); }}
+      role="dialog"
+    >
+      <form
+        className="max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-t-2xl bg-white p-5 shadow-xl sm:rounded-2xl"
+        onClick={(event) => event.stopPropagation()}
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (!invalidAmount) onSubmit(amountCents);
+        }}
+      >
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-sm font-semibold text-kredo-primary">Ganancia acumulada</p>
+            <h2 className="mt-1 text-xl font-bold text-kredo-ink">Retirar utilidad acumulada</h2>
+          </div>
+          <button aria-label="Cerrar" className="rounded-md border border-kredo-line p-2" disabled={isPending} onClick={onClose} type="button">
+            <X className="h-5 w-5" aria-hidden="true" />
+          </button>
+        </div>
+
+        <dl className="mt-5 divide-y divide-emerald-100 rounded-xl bg-emerald-50 px-4 text-sm">
+          <div className="flex justify-between gap-4 py-3"><dt className="text-kredo-muted">Ganancia generada</dt><dd className="font-semibold">{formatMoney(accumulatedProfitCents)}</dd></div>
+          <div className="flex justify-between gap-4 py-3"><dt className="text-kredo-muted">- Utilidad retirada</dt><dd className="font-semibold">{formatMoney(withdrawnCents)}</dd></div>
+          <div className="flex justify-between gap-4 py-3"><dt className="text-kredo-muted">Caja disponible</dt><dd className="font-semibold">{formatMoney(cashCents)}</dd></div>
+        </dl>
+        <div className="mt-3 rounded-xl bg-emerald-50 p-4">
+          <p className="text-xs font-semibold text-kredo-muted">Disponible para retirar</p>
+          <p className="mt-1 text-2xl font-bold text-kredo-green">{formatMoney(availableCents)}</p>
+        </div>
+
+        {availableCents > 0 ? (
+          <label className="mt-5 block">
+            <span className="text-sm font-medium text-kredo-ink">Monto a retirar</span>
+            <div className="mt-2 flex gap-2">
+              <input
+                autoFocus
+                className="min-h-12 min-w-0 flex-1 rounded-md border border-kredo-line px-3 text-base outline-none focus:border-kredo-primary"
+                max={(availableCents / 100).toFixed(2)}
+                min="0.01"
+                onChange={(event) => setAmount(event.target.value)}
+                placeholder="0.00"
+                step="0.01"
+                type="number"
+                value={amount}
+              />
+            </div>
+            <div className="mt-2 grid grid-cols-3 gap-2">
+              <button className="min-h-10 rounded-md border border-kredo-line text-sm font-semibold text-kredo-primary" onClick={() => setPercentage(0.25)} type="button">25%</button>
+              <button className="min-h-10 rounded-md border border-kredo-line text-sm font-semibold text-kredo-primary" onClick={() => setPercentage(0.5)} type="button">50%</button>
+              <button className="min-h-10 rounded-md border border-kredo-line text-sm font-semibold text-kredo-primary" onClick={() => setPercentage(1)} type="button">Todo</button>
+            </div>
+            {amountCents > availableCents ? <span className="mt-2 block text-sm text-kredo-red">El monto supera la utilidad disponible.</span> : null}
+          </label>
+        ) : (
+          <p className="mt-5 text-sm leading-6 text-kredo-muted">No hay ganancia acumulada disponible en caja para retirar.</p>
+        )}
+
+        {errorMessage ? <p className="mt-3 rounded-md bg-red-50 p-3 text-sm font-medium text-kredo-red">{errorMessage}</p> : null}
+
+        <div className="mt-5 rounded-xl border border-kredo-line p-4">
+          <p className="text-sm font-bold text-kredo-ink">Después del retiro</p>
+          <dl className="mt-2 divide-y divide-kredo-line text-sm">
+            <div className="flex justify-between gap-4 py-3">
+              <dt className="text-kredo-muted">Ganancia que quedaría</dt>
+              <dd className={`font-bold ${projectedProfitCents < 0 ? "text-kredo-red" : "text-kredo-ink"}`}>{formatMoney(projectedProfitCents)}</dd>
+            </div>
+            <div className="flex justify-between gap-4 py-3">
+              <dt className="text-kredo-muted">Caja que quedaría</dt>
+              <dd className={`font-bold ${projectedCashCents < 0 ? "text-kredo-red" : "text-kredo-ink"}`}>{formatMoney(projectedCashCents)}</dd>
+            </div>
+          </dl>
+        </div>
+
+        <div className="mt-5">
+          <p className="text-sm font-bold text-kredo-ink">Ganancia de cada período</p>
+          <p className="mt-1 text-xs text-kredo-muted">Estos períodos forman la ganancia acumulada.</p>
+          {cyclesLoading ? <p className="mt-3 rounded-lg bg-kredo-surface p-3 text-sm text-kredo-muted">Cargando períodos...</p> : null}
+          {cyclesError ? <p className="mt-3 rounded-lg bg-red-50 p-3 text-sm text-kredo-red">No se pudieron cargar los períodos.</p> : null}
+          <div className="mt-3 divide-y divide-kredo-line overflow-hidden rounded-lg border border-kredo-line">
+            {cycles.map((cycle) => (
+              <div className="flex items-center justify-between gap-4 bg-white p-3" key={cycle.startDate}>
+                <div>
+                  <p className="text-sm font-medium text-kredo-ink">{cycle.startDate} al {cycle.endDate}</p>
+                  <p className="mt-0.5 text-xs text-kredo-muted">Ganancia neta</p>
+                </div>
+                <p className={`text-sm font-bold ${cycle.netProfitCents < 0 ? "text-kredo-red" : "text-kredo-green"}`}>{formatMoney(cycle.netProfitCents)}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <button
+          className="mt-5 min-h-12 w-full rounded-md bg-kredo-primary px-4 font-semibold text-white disabled:opacity-50"
+          disabled={invalidAmount || isPending || availableCents <= 0}
+          type="submit"
+        >
+          {isPending ? "Registrando retiro..." : "Confirmar retiro"}
+        </button>
+      </form>
+    </div>
+  );
+}
+
+type CycleHistoryModalProps = {
+  currentStartDate: string;
+  cycles: CycleProfitSummary[];
+  error: boolean;
+  isLoading: boolean;
+  onClose: () => void;
+};
+
+function CycleHistoryModal({ currentStartDate, cycles, error, isLoading, onClose }: CycleHistoryModalProps) {
+  const [expandedCycle, setExpandedCycle] = useState<string | null>(null);
+
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [onClose]);
+
+  return (
+    <div
+      aria-label="Ganancia por ciclo"
+      aria-modal="true"
+      className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/50 sm:items-center sm:p-4"
+      onClick={onClose}
+      role="dialog"
+    >
+      <article className="max-h-[88vh] w-full max-w-lg overflow-y-auto rounded-t-2xl bg-white p-5 shadow-xl sm:rounded-2xl" onClick={(event) => event.stopPropagation()}>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-sm font-semibold text-kredo-primary">Historial</p>
+            <h2 className="mt-1 text-xl font-bold text-kredo-ink">Ganancia por ciclo</h2>
+          </div>
+          <button aria-label="Cerrar historial" className="rounded-md border border-kredo-line p-2" onClick={onClose} type="button">
+            <X className="h-5 w-5" aria-hidden="true" />
+          </button>
+        </div>
+
+        {isLoading ? <p className="mt-5 rounded-lg bg-kredo-surface p-4 text-sm text-kredo-muted">Cargando ciclos...</p> : null}
+        {error ? <p className="mt-5 rounded-lg bg-red-50 p-4 text-sm text-kredo-red">No se pudieron cargar los ciclos.</p> : null}
+
+        <div className="mt-5 space-y-3">
+          {cycles.map((cycle) => {
+            const isExpanded = expandedCycle === cycle.startDate;
+            const isCurrent = cycle.startDate === currentStartDate;
+
+            return (
+              <div className="overflow-hidden rounded-xl border border-kredo-line" key={cycle.startDate}>
+                <button
+                  aria-expanded={isExpanded}
+                  className="flex w-full items-center justify-between gap-4 bg-white p-4 text-left"
+                  onClick={() => setExpandedCycle(isExpanded ? null : cycle.startDate)}
+                  type="button"
+                >
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-semibold text-kredo-ink">{cycle.startDate} al {cycle.endDate}</p>
+                      {isCurrent ? <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-bold uppercase text-kredo-primary">Actual</span> : null}
+                    </div>
+                    <p className={`mt-1 text-xl font-bold ${cycle.netProfitCents < 0 ? "text-kredo-red" : "text-kredo-green"}`}>
+                      {formatMoney(cycle.netProfitCents)}
+                    </p>
+                    <p className="mt-1 text-xs font-semibold text-kredo-primary">
+                      {isExpanded ? "Ocultar desglose" : "Ver desglose"}
+                    </p>
+                  </div>
+                  <ChevronDown className={`h-5 w-5 shrink-0 text-kredo-muted transition-transform ${isExpanded ? "rotate-180" : ""}`} aria-hidden="true" />
+                </button>
+
+                {isExpanded ? (
+                  <div className="border-t border-kredo-line bg-kredo-surface p-4">
+                    <p className="rounded-lg bg-white px-3 py-2 text-xs font-semibold text-kredo-ink">
+                      Intereses + mora - gastos - pérdidas
+                    </p>
+                    <dl className="mt-3 divide-y divide-kredo-line rounded-lg border border-kredo-line bg-white px-3 text-sm">
+                      <div className="flex justify-between gap-4 py-3"><dt className="text-kredo-muted">+ Intereses cobrados</dt><dd className="font-semibold">{formatMoney(cycle.interestCollectedCents)}</dd></div>
+                      <div className="flex justify-between gap-4 py-3"><dt className="text-kredo-muted">+ Mora cobrada</dt><dd className="font-semibold">{formatMoney(cycle.lateFeeIncomeCents)}</dd></div>
+                      <div className="flex justify-between gap-4 py-3"><dt className="text-kredo-muted">- Gastos</dt><dd className="font-semibold">{formatMoney(cycle.expensesCents)}</dd></div>
+                      <div className="flex justify-between gap-4 py-3"><dt className="text-kredo-muted">- Pérdidas</dt><dd className="font-semibold">{formatMoney(cycle.loanLossCents)}</dd></div>
+                      <div className="flex justify-between gap-4 py-3"><dt className="font-semibold text-kredo-ink">= Ganancia neta</dt><dd className={`font-bold ${cycle.netProfitCents < 0 ? "text-kredo-red" : "text-kredo-green"}`}>{formatMoney(cycle.netProfitCents)}</dd></div>
+                    </dl>
+                    <dl className="mt-3 divide-y divide-kredo-line rounded-lg border border-kredo-line bg-white px-3 text-sm">
+                      <div className="flex justify-between gap-4 py-3"><dt className="text-kredo-muted">Retiros realizados en este ciclo</dt><dd className="font-semibold">{formatMoney(cycle.profitWithdrawnCents)}</dd></div>
+                    </dl>
+
+                    <div className="mt-4">
+                      <p className="text-sm font-bold text-kredo-ink">De dónde sale este monto</p>
+                      <p className="mt-1 text-xs text-kredo-muted">Cada cobro suma; cada gasto o pérdida resta.</p>
+                      <div className="mt-3 divide-y divide-kredo-line overflow-hidden rounded-lg border border-kredo-line bg-white">
+                        {cycle.sources.map((source) => (
+                          <div className="flex items-center justify-between gap-4 p-3" key={source.id}>
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-medium text-kredo-ink">{source.label}</p>
+                              <p className="mt-0.5 text-xs text-kredo-muted">{source.date}</p>
+                            </div>
+                            <p className={`shrink-0 text-sm font-bold ${source.direction === "income" ? "text-kredo-green" : "text-kredo-red"}`}>
+                              {source.direction === "income" ? "+" : "-"}{formatMoney(source.amountCents)}
+                            </p>
+                          </div>
+                        ))}
+                        {cycle.sources.length === 0 ? (
+                          <p className="p-3 text-sm text-kredo-muted">No hubo movimientos de ganancia en este ciclo.</p>
+                        ) : null}
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+      </article>
+    </div>
+  );
 }
 
 export function DashboardPage() {
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const { organizationId } = useOrganization();
-  const [searchTerm, setSearchTerm] = useState("");
-  const [activeSummaryTab, setActiveSummaryTab] = useState<SummaryTab>("operation");
   const [selectedMetric, setSelectedMetric] = useState<MetricKey | null>(null);
+  const [cycleHistoryOpen, setCycleHistoryOpen] = useState(false);
+  const [withdrawalOpen, setWithdrawalOpen] = useState(false);
   const { data, isLoading, error } = useQuery({
     queryKey: ["dashboard-summary"],
     queryFn: getDashboardSummary,
   });
-  const normalizedSearchTerm = searchTerm.trim().toLowerCase();
-  const visibleClients = useMemo(() => {
-    if (!normalizedSearchTerm) {
-      return data?.clients ?? [];
-    }
+  const cycleHistoryQuery = useQuery({
+    enabled: cycleHistoryOpen || withdrawalOpen,
+    queryKey: ["cycle-profit-history"],
+    queryFn: listCycleProfitSummaries,
+  });
+  const positiveCashCents = Math.max(data?.availableCashCents ?? 0, 0);
+  const positiveLentCents = Math.max(data?.capitalLentCents ?? 0, 0);
+  const distributionTotalCents = positiveCashCents + positiveLentCents;
+  const lentPercent = distributionTotalCents > 0 ? (positiveLentCents / distributionTotalCents) * 100 : 0;
+  const cashPercent = distributionTotalCents > 0 ? 100 - lentPercent : 0;
+  const remainingAccumulatedProfitCents = Math.max((data?.netProfitCents ?? 0) - (data?.totalProfitWithdrawnCents ?? 0), 0);
+  const withdrawableProfitCents = Math.min(remainingAccumulatedProfitCents, positiveCashCents);
+  const withdrawalMutation = useMutation({
+    mutationFn: (amountCents: number) => {
+      if (!user || !organizationId) throw new Error("No se pudo identificar la empresa.");
 
-    return (data?.clients ?? []).filter((client) => (
-      client.full_name.toLowerCase().includes(normalizedSearchTerm) ||
-      client.client_code.toLowerCase().includes(normalizedSearchTerm) ||
-      (client.identification ?? "").toLowerCase().includes(normalizedSearchTerm) ||
-      (client.phone ?? "").toLowerCase().includes(normalizedSearchTerm)
-    ));
-  }, [data?.clients, normalizedSearchTerm]);
-  const lendingGuidance = calculateLendingLimitGuidance(data?.availableCashCents ?? 0, 0);
-  const negativeCashCents = Math.max(-(data?.availableCashCents ?? 0), 0);
-  const reconciliationMutation = useMutation({
-    mutationFn: async () => {
-      if (!user || !organizationId || negativeCashCents <= 0) {
-        throw new Error("No hay saldo pendiente por conciliar.");
-      }
-
-      return createCapitalContribution({
+      return createProfitWithdrawal({
         userId: user.id,
         organizationId,
         movementDate: toDateInputValue(),
-        amountCents: negativeCashCents,
-        source: "manual_cash_reconciliation",
-        description: "Aporte de capital confirmado para conciliar caja negativa existente.",
+        amountCents,
       });
     },
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["dashboard-summary"] });
-      await queryClient.invalidateQueries({ queryKey: ["available-cash", organizationId] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["dashboard-summary"] }),
+        queryClient.invalidateQueries({ queryKey: ["available-cash", organizationId] }),
+        queryClient.invalidateQueries({ queryKey: ["report-data"] }),
+        queryClient.invalidateQueries({ queryKey: ["cycle-profit-history"] }),
+      ]);
+      setWithdrawalOpen(false);
     },
   });
-  const summaryTabs: Array<{ id: SummaryTab; label: string }> = [
-    { id: "operation", label: "Operacion" },
-    { id: "capital", label: "Capital" },
-    { id: "profit", label: "Ganancia" },
-    { id: "activity", label: "Actividad" },
-  ];
 
   return (
     <section>
-      <PageHeader
-        eyebrow="Dashboard"
-        title="Resumen financiero"
-        description="Capital, caja, cartera y ganancia separados por naturaleza."
-      />
-
-      <div className="mb-4">
-        <div className="grid grid-cols-4 rounded-lg border border-kredo-line bg-white p-1">
-          {summaryTabs.map((tab) => (
-            <button
-              className={`min-h-10 rounded-md px-2 text-xs font-semibold ${
-                activeSummaryTab === tab.id ? "bg-kredo-primary text-white" : "text-kredo-muted"
-              }`}
-              key={tab.id}
-              onClick={() => setActiveSummaryTab(tab.id)}
-              type="button"
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-
-        <div className="mt-3 grid grid-cols-2 gap-3">
-          {activeSummaryTab === "operation" ? (
-            <>
-              <MetricCard
-                label="Dinero disponible"
-                value={formatMoney(data?.availableCashCents ?? 0)}
-                helper="Caja no prestada, calculada desde movimientos."
-                onClick={() => setSelectedMetric("availableCash")}
-                tone="green"
-              />
-              <MetricCard
-                label="Limite por persona"
-                value={negativeCashCents > 0 ? "No disponible" : formatMoney(lendingGuidance.recommendedLimitCents)}
-                helper={negativeCashCents > 0 ? "Primero concilia la caja negativa." : `Normal ${formatMoney(lendingGuidance.normalLimitCents)} - Excepcion ${formatMoney(lendingGuidance.exceptionalLimitCents)}`}
-                onClick={() => setSelectedMetric("lendingLimit")}
-                tone="yellow"
-              />
-              <MetricCard
-                label="Dinero actualmente prestado"
-                value={formatMoney(data?.capitalLentCents ?? 0)}
-                helper="Cartera activa: capital pendiente de cobrar."
-                onClick={() => setSelectedMetric("capitalLent")}
-              />
-              <MetricCard label="Clientes activos" value={`${data?.activeClientCount ?? 0}`} helper={`${data?.lateClientCount ?? 0} con atraso`} onClick={() => setSelectedMetric("activeClients")} />
-              <MetricCard
-                label="Proximo cierre"
-                value={data?.nextCloseDate ?? "Cargando"}
-                helper={data ? `Ciclo ${data.cyclePaymentStartDate} al ${data.cyclePaymentEndDate}` : "Cargando ciclo actual"}
-                onClick={() => setSelectedMetric("nextClose")}
-              />
-            </>
-          ) : null}
-
-          {activeSummaryTab === "capital" ? (
-            <>
-              <MetricCard
-                label="Capital propio aportado"
-                value={formatMoney(data?.capitalContributedCents ?? 0)}
-                helper="Dinero nuevo colocado por el propietario."
-                onClick={() => setSelectedMetric("capitalContributed")}
-              />
-              <MetricCard label="Capital retirado" value={formatMoney(data?.capitalWithdrawnCents ?? 0)} helper="Retiros hechos por el propietario." onClick={() => setSelectedMetric("capitalWithdrawn")} />
-              <MetricCard
-                label="Dinero actualmente prestado"
-                value={formatMoney(data?.capitalLentCents ?? 0)}
-                helper="Cartera activa: capital pendiente de cobrar."
-                onClick={() => setSelectedMetric("capitalLent")}
-              />
-              <MetricCard label="Total cartera" value={formatMoney(data?.totalPortfolioCents ?? 0)} onClick={() => setSelectedMetric("totalPortfolio")} />
-              <MetricCard
-                label="Rotacion del capital"
-                value={formatRatio(data?.cycleCapitalRotation ?? 0)}
-                helper="Veces que el capital neto aportado roto en este ciclo."
-                onClick={() => setSelectedMetric("capitalRotation")}
-              />
-            </>
-          ) : null}
-
-          {activeSummaryTab === "profit" ? (
-            <>
-              <MetricCard
-                label="Intereses cobrados"
-                value={formatMoney(data?.interestCollectedCents ?? 0)}
-                helper="Ingresos financieros recibidos en efectivo."
-                onClick={() => setSelectedMetric("interestCollected")}
-                tone="yellow"
-              />
-              <MetricCard
-                label="Ganancia neta"
-                value={formatMoney(data?.netProfitCents ?? 0)}
-                helper="Intereses y otros ingresos menos gastos y perdidas."
-                onClick={() => setSelectedMetric("netProfit")}
-                tone={(data?.netProfitCents ?? 0) < 0 ? "red" : "green"}
-              />
-              <MetricCard
-                label="Interes generado"
-                value={formatMoney(data?.interestGeneratedCents ?? 0)}
-                helper="Interes causado, aunque no se haya cobrado."
-                onClick={() => setSelectedMetric("interestGenerated")}
-              />
-              <MetricCard label="Interes pendiente" value={formatMoney(data?.pendingInterestCents ?? 0)} onClick={() => setSelectedMetric("pendingInterest")} tone="yellow" />
-            </>
-          ) : null}
-
-          {activeSummaryTab === "activity" ? (
-            <>
-              <MetricCard
-                label="Pagos del ciclo"
-                value={formatMoney(data?.cyclePaymentsCents ?? 0)}
-                helper={data ? `Ciclo ${data.cyclePaymentStartDate} al ${data.cyclePaymentEndDate}` : "Cargando ciclo actual"}
-                onClick={() => setSelectedMetric("cyclePayments")}
-                tone="green"
-              />
-              <MetricCard
-                label="Capital recuperado ciclo"
-                value={formatMoney(data?.cyclePrincipalRecoveredCents ?? 0)}
-                helper={`Interes cobrado ${formatMoney(data?.cycleInterestCollectedCents ?? 0)}`}
-                onClick={() => setSelectedMetric("cyclePrincipal")}
-              />
-              <MetricCard
-                label="Total desembolsado ciclo"
-                value={formatMoney(data?.cycleLoanVolumeCents ?? 0)}
-                helper="Volumen prestado, incluyendo dinero reutilizado."
-                onClick={() => setSelectedMetric("cycleLoans")}
-              />
-              <MetricCard
-                label="Control historico"
-                value={formatMoney(data?.historicalLoanVolumeCents ?? 0)}
-                helper={`Prestamos ${data?.loanCount ?? 0} - Recuperacion ${formatPercent(data?.recoveryRate ?? 0)}`}
-                onClick={() => setSelectedMetric("historicalLoans")}
-              />
-            </>
-          ) : null}
-        </div>
-
-        {activeSummaryTab === "operation" && negativeCashCents > 0 ? (
-          <article className="mt-3 rounded-lg border border-red-200 bg-red-50 p-4 text-sm">
-            <p className="font-semibold text-kredo-red">La caja necesita conciliacion</p>
-            <p className="mt-1 text-kredo-muted">
-              Si los {formatMoney(negativeCashCents)} prestados salieron de dinero aportado por el propietario, registra ese aporte para llevar la caja a cero.
-            </p>
-            <button
-              className="mt-3 min-h-11 rounded-md bg-kredo-primary px-4 py-2 font-semibold text-white disabled:opacity-60"
-              disabled={reconciliationMutation.isPending}
-              onClick={() => reconciliationMutation.mutate()}
-              type="button"
-            >
-              {reconciliationMutation.isPending ? "Registrando..." : `Registrar aporte de ${formatMoney(negativeCashCents)}`}
-            </button>
-            {reconciliationMutation.isError ? <p className="mt-2 font-medium text-kredo-red">No se pudo registrar el aporte. Intenta nuevamente.</p> : null}
-          </article>
-        ) : null}
-      </div>
-
-      <div className="mb-4 flex gap-2">
-        <label className="flex min-h-12 flex-1 items-center gap-2 rounded-md border border-kredo-line bg-white px-3">
-          <Search className="h-5 w-5 text-kredo-muted" aria-hidden="true" />
-          <input
-            className="min-w-0 flex-1 bg-transparent text-base outline-none"
-            onChange={(event) => setSearchTerm(event.target.value)}
-            placeholder="Buscar cliente"
-            type="search"
-            value={searchTerm}
-          />
-        </label>
-        <Link
-          aria-label="Registrar pago"
-          className="inline-flex min-h-12 items-center justify-center rounded-md bg-kredo-primary px-4 text-sm font-semibold text-white"
-          to="/payments/new"
-        >
-          <Plus className="h-5 w-5" aria-hidden="true" />
-        </Link>
-      </div>
+      <PageHeader eyebrow="Inicio" title="Tu dinero" />
 
       {isLoading ? (
-        <article className="rounded-lg border border-kredo-line bg-white p-4 text-sm text-kredo-muted">Cargando datos...</article>
+        <article className="rounded-lg border border-kredo-line bg-white p-4 text-sm text-kredo-muted">
+          Cargando...
+        </article>
       ) : null}
 
       {error ? (
         <article className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm font-medium text-kredo-red">
-          No se pudieron cargar todos los datos del resumen. Refresca la pagina e intenta nuevamente.
+          No se pudo cargar la información. Refresca la página e intenta nuevamente.
         </article>
       ) : null}
 
-      <div className="space-y-3">
-        {visibleClients.map((client) => (
-          <article className="rounded-lg border border-kredo-line bg-white p-4" key={client.id}>
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <h2 className="font-semibold text-kredo-ink">{client.full_name}</h2>
-                <p className="mt-1 text-sm text-kredo-muted">Codigo: {client.client_code}</p>
+      {data ? (
+        <div className="space-y-3">
+          <button
+            aria-label="Ver cómo se calcula el dinero total"
+            className="kredo-rise relative w-full overflow-hidden rounded-2xl bg-gradient-to-br from-[#1463ff] to-[#083da5] p-6 text-left text-white shadow-soft transition-transform duration-200 hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-kredo-primary focus:ring-offset-2"
+            onClick={() => setSelectedMetric("total")}
+            type="button"
+          >
+            <div className="absolute -right-12 -top-12 h-40 w-40 rounded-full bg-white/10" aria-hidden="true" />
+            <div className="absolute -bottom-16 right-12 h-32 w-32 rounded-full bg-white/5" aria-hidden="true" />
+            <div className="relative">
+              <div className="mb-7 inline-flex h-11 w-11 items-center justify-center rounded-xl bg-white/15">
+                <Wallet className="h-6 w-6" aria-hidden="true" />
               </div>
-              <StatusBadge status={client.status} />
-            </div>
-            <div className="mt-4 grid grid-cols-3 gap-2 text-sm">
-              <div>
-                <p className="text-kredo-muted">Capital</p>
-                <p className="font-semibold">{formatMoney(client.balance?.principal_balance_cents ?? 0)}</p>
-              </div>
-              <div>
-                <p className="text-kredo-muted">Interes</p>
-                <p className="font-semibold">{formatMoney(client.balance?.interest_balance_cents ?? 0)}</p>
-              </div>
-              <div>
-                <p className="text-kredo-muted">Total</p>
-                <p className="font-semibold">{formatMoney(client.balance?.total_balance_cents ?? 0)}</p>
-              </div>
-            </div>
-            <div className="mt-4 grid grid-cols-3 gap-2">
-              <Link
-                className="inline-flex min-h-11 items-center justify-center rounded-md bg-kredo-primary px-3 text-sm font-semibold text-white"
-                to={`/loans/new?clientId=${client.id}`}
-              >
-                Prestamo
-              </Link>
-              <Link
-                className="inline-flex min-h-11 items-center justify-center rounded-md bg-kredo-green px-3 text-sm font-semibold text-white"
-                to={`/payments/new?clientId=${client.id}`}
-              >
-                Pago
-              </Link>
-              <Link
-                className="inline-flex min-h-11 items-center justify-center rounded-md border border-kredo-line px-3 text-sm font-semibold"
-                to={`/clients/${client.id}`}
-              >
-                Detalle
-              </Link>
-            </div>
-          </article>
-        ))}
+              <p className="text-sm font-semibold text-blue-100">Dinero total</p>
+              <AnimatedMoney className="mt-2 text-4xl font-bold tracking-tight" value={data.retainedEquityCents} />
 
-        {!isLoading && !error && (data?.clients.length ?? 0) === 0 ? (
-          <article className="rounded-lg border border-dashed border-kredo-line bg-white p-4 text-sm text-kredo-muted">
-            Aun no hay clientes registrados en esta empresa.
-          </article>
-        ) : null}
+              <div className="mt-7">
+                <div className="mb-2 flex items-center justify-between text-xs font-medium text-blue-100">
+                  <span>Prestado</span>
+                  <span>En caja</span>
+                </div>
+                <div className="flex h-2.5 overflow-hidden rounded-full bg-white/20">
+                  <div
+                    className="kredo-bar bg-amber-300"
+                    style={{ width: `${lentPercent}%` }}
+                    title={`Prestado: ${formatMoney(data.capitalLentCents)}`}
+                  />
+                  <div
+                    className="kredo-bar bg-emerald-300"
+                    style={{ width: `${cashPercent}%` }}
+                    title={`En caja: ${formatMoney(data.availableCashCents)}`}
+                  />
+                </div>
+              </div>
+              <p className="mt-5 inline-flex items-center gap-1 text-xs font-semibold text-blue-100">
+                Ver cómo se calcula <ChevronRight className="h-4 w-4" aria-hidden="true" />
+              </p>
+            </div>
+          </button>
 
-        {!isLoading && !error && (data?.clients.length ?? 0) > 0 && visibleClients.length === 0 ? (
-          <article className="rounded-lg border border-dashed border-kredo-line bg-white p-4 text-sm text-kredo-muted">
-            No hay clientes que coincidan con la busqueda.
-          </article>
-        ) : null}
-      </div>
+          <div className="grid grid-cols-2 gap-3">
+            <button
+              aria-label="Ver cómo se calcula el dinero prestado"
+              className="kredo-rise kredo-rise-delay-1 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-left transition-transform duration-200 hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-kredo-primary"
+              onClick={() => setSelectedMetric("lent")}
+              type="button"
+            >
+              <div className="mb-5 inline-flex h-10 w-10 items-center justify-center rounded-xl bg-amber-100 text-kredo-yellow">
+                <HandCoins className="h-5 w-5" aria-hidden="true" />
+              </div>
+              <p className="text-xs font-semibold text-kredo-muted">Dinero prestado</p>
+              <AnimatedMoney className="mt-2 break-words text-xl font-bold tracking-tight text-kredo-ink sm:text-2xl" value={data.capitalLentCents} />
+              <p className="mt-4 inline-flex items-center gap-1 text-xs font-semibold text-kredo-primary">
+                Ver cálculo <ChevronRight className="h-4 w-4" aria-hidden="true" />
+              </p>
+            </button>
 
-      {selectedMetric ? <MetricDetailsModal detail={buildMetricDetail(selectedMetric, data)} onClose={() => setSelectedMetric(null)} /> : null}
+            <button
+              aria-label="Ver cómo se calcula el dinero en caja"
+              className={`kredo-rise kredo-rise-delay-2 rounded-2xl border p-4 text-left transition-transform duration-200 hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-kredo-primary ${data.availableCashCents < 0 ? "border-red-200 bg-red-50" : "border-emerald-200 bg-emerald-50"}`}
+              onClick={() => setSelectedMetric("cash")}
+              type="button"
+            >
+              <div className={`mb-5 inline-flex h-10 w-10 items-center justify-center rounded-xl ${data.availableCashCents < 0 ? "bg-red-100 text-kredo-red" : "bg-emerald-100 text-kredo-green"}`}>
+                <Banknote className="h-5 w-5" aria-hidden="true" />
+              </div>
+              <p className="text-xs font-semibold text-kredo-muted">Dinero en caja</p>
+              <AnimatedMoney className="mt-2 break-words text-xl font-bold tracking-tight text-kredo-ink sm:text-2xl" value={data.availableCashCents} />
+              <p className="mt-4 inline-flex items-center gap-1 text-xs font-semibold text-kredo-primary">
+                Ver cálculo <ChevronRight className="h-4 w-4" aria-hidden="true" />
+              </p>
+            </button>
+          </div>
+
+          <article className="kredo-rise kredo-rise-delay-2 rounded-2xl border border-violet-200 bg-gradient-to-br from-violet-50 to-white p-5">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="mb-4 inline-flex h-10 w-10 items-center justify-center rounded-xl bg-violet-100 text-violet-700">
+                  <TrendingUp className="h-5 w-5" aria-hidden="true" />
+                </div>
+                <p className="text-sm font-semibold text-kredo-muted">Ganancia del ciclo</p>
+                <AnimatedMoney className={`mt-2 text-3xl font-bold tracking-tight ${data.cycleNetProfitCents < 0 ? "text-kredo-red" : "text-kredo-ink"}`} value={data.cycleNetProfitCents} />
+                <p className="mt-1 text-xs text-kredo-muted">{data.cyclePaymentStartDate} al {data.cyclePaymentEndDate}</p>
+              </div>
+            </div>
+
+            <div className="mt-5 grid grid-cols-2 gap-2">
+              <button
+                className="inline-flex min-h-11 items-center justify-center gap-1 rounded-md border border-violet-200 bg-white px-3 text-sm font-semibold text-violet-700"
+                onClick={() => setSelectedMetric("profit")}
+                type="button"
+              >
+                Ver cálculo <ChevronRight className="h-4 w-4" aria-hidden="true" />
+              </button>
+              <button
+                className="min-h-11 rounded-md bg-violet-700 px-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                onClick={() => {
+                  withdrawalMutation.reset();
+                  setWithdrawalOpen(true);
+                }}
+                type="button"
+              >
+                Retirar utilidad
+              </button>
+            </div>
+            <p className="mt-3 text-xs text-kredo-muted">
+              Disponible de la ganancia acumulada: <span className="font-semibold text-kredo-ink">{formatMoney(withdrawableProfitCents)}</span>
+            </p>
+            <button
+              className="mt-2 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md text-sm font-semibold text-violet-700 hover:bg-violet-50"
+              onClick={() => setCycleHistoryOpen(true)}
+              type="button"
+            >
+              <CalendarRange className="h-4 w-4" aria-hidden="true" />
+              Ver todos los ciclos
+            </button>
+            {remainingAccumulatedProfitCents > 0 && withdrawableProfitCents <= 0 ? (
+              <p className="mt-3 text-xs text-kredo-muted">La utilidad existe, pero todavía no está disponible en caja.</p>
+            ) : null}
+          </article>
+        </div>
+      ) : null}
+
+      {data && selectedMetric ? (
+        <MetricDetailsModal detail={buildMetricDetail(selectedMetric, data)} onClose={() => setSelectedMetric(null)} />
+      ) : null}
+
+      {withdrawalOpen ? (
+        <ProfitWithdrawalModal
+          accumulatedProfitCents={data?.netProfitCents ?? 0}
+          availableCents={withdrawableProfitCents}
+          cashCents={data?.availableCashCents ?? 0}
+          cycles={cycleHistoryQuery.data ?? []}
+          cyclesError={cycleHistoryQuery.isError}
+          cyclesLoading={cycleHistoryQuery.isLoading}
+          errorMessage={withdrawalMutation.error instanceof Error ? withdrawalMutation.error.message : undefined}
+          isPending={withdrawalMutation.isPending}
+          onClose={() => setWithdrawalOpen(false)}
+          onSubmit={(amountCents) => withdrawalMutation.mutate(amountCents)}
+          withdrawnCents={data?.totalProfitWithdrawnCents ?? 0}
+        />
+      ) : null}
+
+      {cycleHistoryOpen && data ? (
+        <CycleHistoryModal
+          currentStartDate={data.cyclePaymentStartDate}
+          cycles={cycleHistoryQuery.data ?? []}
+          error={cycleHistoryQuery.isError}
+          isLoading={cycleHistoryQuery.isLoading}
+          onClose={() => setCycleHistoryOpen(false)}
+        />
+      ) : null}
     </section>
   );
 }
