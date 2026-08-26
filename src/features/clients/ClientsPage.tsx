@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { Download, Plus, Search, Share2, Tag } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
+import { Download, Plus, Search, Share2, Tag, X } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import html2canvas from "html2canvas";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { formatMoney } from "@/lib/money";
 import { toDateInputValue } from "@/lib/dates";
 import { listClientsWithBalances, type ClientWithBalance } from "@/services/clients.service";
-import { listTags } from "@/services/tags.service";
+import { addClientTag, createTag, listTags, removeClientTag } from "@/services/tags.service";
+import { useAuth } from "@/features/auth/AuthProvider";
 import { useOrganization } from "@/features/organizations/OrganizationProvider";
 import type { ClientStatus } from "@/types/domain";
 
@@ -114,18 +115,24 @@ function TagSharePage({ allClients, businessName, clients, pageNumber, pageTotal
 }
 
 export function ClientsPage() {
-  const { organization } = useOrganization();
+  const { user } = useAuth();
+  const { organization, organizationId } = useOrganization();
+  const queryClient = useQueryClient();
   const [activeFilter, setActiveFilter] = useState<ClientFilter>("all");
   const [activeTagId, setActiveTagId] = useState("all");
   const [searchTerm, setSearchTerm] = useState("");
   const [shareMessage, setShareMessage] = useState("");
   const [isPreparingImages, setIsPreparingImages] = useState(false);
+  const [tagManagerClientId, setTagManagerClientId] = useState<string | null>(null);
+  const [quickTagName, setQuickTagName] = useState("");
+  const [tagManagerError, setTagManagerError] = useState("");
   const sharePageRefs = useRef<Array<HTMLElement | null>>([]);
   const preparedImagesRef = useRef<Array<{ blob: Blob; file: File; fileName: string }>>([]);
 
   const { data: clients = [], isLoading, error } = useQuery({ queryKey: ["clients"], queryFn: listClientsWithBalances });
   const { data: tags = [], error: tagsError } = useQuery({ queryKey: ["tags"], queryFn: listTags });
   const activeTag = tags.find((tag) => tag.id === activeTagId) ?? null;
+  const managedClient = clients.find((client) => client.id === tagManagerClientId) ?? null;
   const normalizedSearch = searchTerm.trim().toLocaleLowerCase();
 
   const filteredClients = useMemo(() => clients
@@ -148,6 +155,44 @@ export function ClientsPage() {
     clients.forEach((client) => client.tags.forEach((tag) => counts.set(tag.id, (counts.get(tag.id) ?? 0) + 1)));
     return counts;
   }, [clients]);
+
+  const tagAssignmentMutation = useMutation({
+    mutationFn: async (input: { clientId: string; tagId: string; assigned: boolean }) => {
+      if (!organizationId) throw new Error("Organization required");
+      const operation = input.assigned ? removeClientTag : addClientTag;
+      await operation({ clientId: input.clientId, organizationId, tagId: input.tagId });
+    },
+    onSuccess: async () => {
+      setTagManagerError("");
+      await queryClient.invalidateQueries({ queryKey: ["clients"] });
+    },
+    onError: (_error, input) => {
+      setTagManagerClientId(input.clientId);
+      setTagManagerError("No se pudo actualizar la etiqueta. Intenta nuevamente.");
+    },
+  });
+
+  const quickTagMutation = useMutation({
+    mutationFn: async () => {
+      if (!user || !organizationId || !managedClient) throw new Error("Authentication required");
+      const tag = await createTag({ organizationId, userId: user.id, name: quickTagName });
+      await addClientTag({ clientId: managedClient.id, organizationId, tagId: tag.id });
+    },
+    onSuccess: async () => {
+      setQuickTagName("");
+      setTagManagerError("");
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["clients"] }),
+        queryClient.invalidateQueries({ queryKey: ["tags"] }),
+      ]);
+    },
+    onError: () => setTagManagerError("No se pudo crear la etiqueta. Revisa el nombre e intenta nuevamente."),
+  });
+
+  function toggleClientTag(clientId: string, tagId: string, assigned: boolean) {
+    setTagManagerError("");
+    tagAssignmentMutation.mutate({ clientId, tagId, assigned });
+  }
 
   const prepareShareImages = useCallback(async () => {
     if (!activeTag || sharePages.length === 0) return [];
@@ -241,15 +286,30 @@ export function ClientsPage() {
 
       <div className="space-y-3">{filteredClients.map((client) => <article className="rounded-lg border border-kredo-line bg-white p-4" key={client.id}>
         <div className="flex items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-[0.12em] text-kredo-muted">{client.client_code}</p><h2 className="mt-1 font-semibold text-kredo-ink">{client.full_name}</h2><p className="mt-1 text-sm text-kredo-muted">{client.identification ?? "Cédula pendiente"} · {client.phone ?? "Teléfono pendiente"}</p></div><StatusBadge status={client.status} /></div>
-        {client.tags.length > 0 ? <div className="mt-3 flex flex-wrap gap-1.5">{client.tags.map((tag) => <span className="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-semibold text-kredo-primary" key={tag.id}>{tag.name}</span>)}</div> : null}
+        {client.tags.length > 0 ? <div className="mt-3 flex flex-wrap gap-1.5">{client.tags.map((tag) => <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 py-1 pl-2.5 pr-1 text-xs font-semibold text-kredo-primary" key={tag.id}>{tag.name}<button aria-label={`Quitar etiqueta ${tag.name} de ${client.full_name}`} className="rounded-full p-1 hover:bg-blue-100 disabled:opacity-50" disabled={tagAssignmentMutation.isPending} onClick={() => toggleClientTag(client.id, tag.id, true)} type="button"><X className="h-3.5 w-3.5" aria-hidden="true" /></button></span>)}</div> : null}
         <div className="mt-4 grid grid-cols-3 gap-2 text-sm"><div><p className="text-kredo-muted">Capital</p><p className="font-semibold">{formatMoney(client.balance?.principal_balance_cents ?? 0)}</p></div><div><p className="text-kredo-muted">Interés</p><p className="font-semibold">{formatMoney(client.balance?.interest_balance_cents ?? 0)}</p></div><div><p className="text-kredo-muted">Total</p><p className="font-semibold">{formatMoney(client.balance?.total_balance_cents ?? 0)}</p></div></div>
-        <Link className="mt-4 inline-flex min-h-11 w-full items-center justify-center rounded-md border border-kredo-line font-semibold" to={`/clients/${client.id}`}>Abrir perfil</Link>
+        <div className="mt-4 grid grid-cols-2 gap-2"><button className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-kredo-line bg-white font-semibold text-kredo-primary" onClick={() => { setTagManagerClientId(client.id); setQuickTagName(""); setTagManagerError(""); }} type="button"><Tag className="h-4 w-4" aria-hidden="true" />Etiquetas</button><Link className="inline-flex min-h-11 items-center justify-center rounded-md border border-kredo-line font-semibold" to={`/clients/${client.id}`}>Abrir perfil</Link></div>
       </article>)}</div>
 
       {!isLoading && !error && clients.length === 0 ? <article className="rounded-lg border border-dashed border-kredo-line bg-white p-4 text-sm text-kredo-muted">Aún no hay clientes registrados en esta empresa.</article> : null}
       {!isLoading && !error && clients.length > 0 && filteredClients.length === 0 ? <article className="rounded-lg border border-dashed border-kredo-line bg-white p-4 text-sm text-kredo-muted">No hay clientes que coincidan con la búsqueda y los filtros seleccionados.</article> : null}
 
       {activeTag ? <div aria-hidden="true" className="pointer-events-none fixed left-[-10000px] top-0">{sharePages.map((page, index) => <div className="mb-4" key={`${activeTag.id}-${index}`} ref={(element) => { sharePageRefs.current[index] = element; }}><TagSharePage allClients={filteredClients} businessName={organization?.name ?? "Kredo"} clients={page} pageNumber={index + 1} pageTotal={sharePages.length} tagName={activeTag.name} /></div>)}</div> : null}
+
+      {managedClient ? <div className="fixed inset-0 z-40 flex items-end bg-black/30 px-4 pb-4"><section aria-labelledby="tag-manager-title" className="w-full rounded-lg border border-kredo-line bg-white p-4 shadow-soft">
+        <div className="flex items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-[0.12em] text-kredo-muted">Cliente</p><h2 className="mt-1 text-lg font-bold" id="tag-manager-title">Etiquetas de {managedClient.full_name}</h2></div><button aria-label="Cerrar etiquetas" className="rounded-full border border-kredo-line p-2 text-kredo-muted" onClick={() => setTagManagerClientId(null)} type="button"><X className="h-5 w-5" aria-hidden="true" /></button></div>
+
+        <p className="mt-4 text-sm font-medium text-kredo-ink">Toca una etiqueta para agregarla o quitarla.</p>
+        {tags.length > 0 ? <div className="mt-3 flex max-h-48 flex-wrap gap-2 overflow-y-auto">{tags.map((tag) => {
+          const assigned = managedClient.tags.some((clientTag) => clientTag.id === tag.id);
+          return <button aria-pressed={assigned} className={`min-h-10 rounded-full border px-3 text-sm font-semibold disabled:opacity-50 ${assigned ? "border-kredo-primary bg-blue-50 text-kredo-primary" : "border-kredo-line bg-white text-kredo-muted"}`} disabled={tagAssignmentMutation.isPending || quickTagMutation.isPending} key={tag.id} onClick={() => toggleClientTag(managedClient.id, tag.id, assigned)} type="button">{assigned ? "✓ " : "+ "}{tag.name}</button>;
+        })}</div> : <p className="mt-3 rounded-md bg-kredo-surface p-3 text-sm text-kredo-muted">Todavía no hay etiquetas. Crea la primera aquí.</p>}
+
+        <div className="mt-5 border-t border-kredo-line pt-4"><label className="text-sm font-medium text-kredo-ink" htmlFor="quick-tag-name">Crear y agregar una etiqueta</label><div className="mt-2 flex gap-2"><input className="min-h-12 min-w-0 flex-1 rounded-md border border-kredo-line bg-white px-3 text-base outline-none focus:border-kredo-primary" id="quick-tag-name" maxLength={40} onChange={(event) => setQuickTagName(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && quickTagName.trim()) quickTagMutation.mutate(); }} placeholder="Ejemplo: Cobrar viernes" value={quickTagName} /><button className="inline-flex min-h-12 items-center justify-center gap-1 rounded-md bg-kredo-primary px-4 font-semibold text-white disabled:opacity-50" disabled={!quickTagName.trim() || quickTagMutation.isPending || tagAssignmentMutation.isPending} onClick={() => quickTagMutation.mutate()} type="button"><Plus className="h-4 w-4" aria-hidden="true" />Agregar</button></div></div>
+
+        {tagManagerError ? <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm font-medium text-kredo-red">{tagManagerError}</p> : null}
+        <button className="mt-4 min-h-12 w-full rounded-md border border-kredo-line bg-white px-4 py-3 font-semibold" onClick={() => setTagManagerClientId(null)} type="button">Listo</button>
+      </section></div> : null}
     </section>
   );
 }

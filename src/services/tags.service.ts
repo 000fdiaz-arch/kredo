@@ -86,3 +86,32 @@ export async function replaceClientTags(input: {
 
   if (insertError) throw insertError;
 }
+
+export async function addClientTag(input: {
+  clientId: string;
+  organizationId: string;
+  tagId: string;
+}) {
+  const { error } = await supabase.from("client_tags").insert({
+    client_id: input.clientId,
+    organization_id: input.organizationId,
+    tag_id: input.tagId,
+  });
+
+  if (error && error.code !== "23505") throw error;
+}
+
+export async function removeClientTag(input: {
+  clientId: string;
+  organizationId: string;
+  tagId: string;
+}) {
+  const { error } = await supabase
+    .from("client_tags")
+    .delete()
+    .eq("client_id", input.clientId)
+    .eq("organization_id", input.organizationId)
+    .eq("tag_id", input.tagId);
+
+  if (error) throw error;
+}
