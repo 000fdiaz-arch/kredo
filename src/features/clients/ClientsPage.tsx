@@ -23,14 +23,6 @@ const statusPriority: Record<ClientStatus, number> = {
   inactive: 4,
 };
 
-const statusLabels: Record<ClientStatus, string> = {
-  late: "Atrasado",
-  interest_pending: "Interés pendiente",
-  current: "Al día",
-  no_movements: "Sin movimientos",
-  inactive: "Inactivo",
-};
-
 const clientFilters: Array<{ id: ClientFilter; label: string }> = [
   { id: "all", label: "Todos" },
   { id: "late", label: "Atrasados" },
@@ -66,9 +58,10 @@ function downloadBlob(blob: Blob, fileName: string) {
   URL.revokeObjectURL(url);
 }
 
-function TagSharePage({ allClients, businessName, clients, pageNumber, pageTotal, tagName }: {
+function TagSharePage({ allClients, businessName, captureRef, clients, pageNumber, pageTotal, tagName }: {
   allClients: ClientWithBalance[];
   businessName: string;
+  captureRef: (element: HTMLElement | null) => void;
   clients: ClientWithBalance[];
   pageNumber: number;
   pageTotal: number;
@@ -80,36 +73,69 @@ function TagSharePage({ allClients, businessName, clients, pageNumber, pageTotal
     total: result.total + (client.balance?.total_balance_cents ?? 0),
   }), { principal: 0, interest: 0, total: 0 });
 
+  const headingCell = {
+    borderBottom: "2px solid #1463ff",
+    color: "#344054",
+    fontSize: "15px",
+    fontWeight: 700,
+    padding: "14px 12px",
+    textAlign: "left" as const,
+    verticalAlign: "bottom" as const,
+  };
+  const amountHeadingCell = { ...headingCell, textAlign: "right" as const };
+  const bodyCell = {
+    borderBottom: "1px solid #d9dee8",
+    fontSize: "17px",
+    padding: "16px 12px",
+  };
+  const amountBodyCell = { ...bodyCell, textAlign: "right" as const, whiteSpace: "nowrap" as const };
+
   return (
-    <article className="w-[390px] bg-white p-6 text-kredo-ink">
-      <header className="border-b border-kredo-line pb-4">
-        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-kredo-primary">{businessName}</p>
-        <div className="mt-2 flex items-start justify-between gap-4">
-          <div><p className="text-sm text-kredo-muted">Etiqueta</p><h1 className="text-2xl font-bold">{tagName}</h1></div>
-          <div className="text-right text-xs text-kredo-muted"><p>{toDateInputValue()}</p>{pageTotal > 1 ? <p className="mt-1">Página {pageNumber} de {pageTotal}</p> : null}</div>
+    <article ref={captureRef} style={{ background: "#ffffff", boxSizing: "border-box", color: "#172033", fontFamily: "Arial, Helvetica, sans-serif", padding: "40px", width: "720px" }}>
+      <header style={{ borderBottom: "1px solid #d9dee8", paddingBottom: "22px" }}>
+        <p style={{ color: "#1463ff", fontSize: "14px", fontWeight: 700, letterSpacing: "2px", margin: 0, textTransform: "uppercase" }}>{businessName}</p>
+        <div style={{ alignItems: "flex-end", display: "flex", justifyContent: "space-between", marginTop: "14px" }}>
+          <div>
+            <p style={{ color: "#667085", fontSize: "14px", margin: "0 0 5px" }}>Etiqueta</p>
+            <h1 style={{ fontSize: "30px", lineHeight: 1.15, margin: 0 }}>{tagName}</h1>
+          </div>
+          <div style={{ color: "#667085", fontSize: "13px", lineHeight: 1.5, textAlign: "right" }}>
+            <p style={{ margin: 0 }}>{toDateInputValue()}</p>
+            {pageTotal > 1 ? <p style={{ margin: 0 }}>Página {pageNumber} de {pageTotal}</p> : null}
+          </div>
         </div>
       </header>
-      <section className="mt-4 space-y-2">
-        {clients.map((client) => (
-          <div className="rounded-md border border-kredo-line p-3" key={client.id}>
-            <div className="flex items-start justify-between gap-3"><p className="font-semibold">{client.full_name}</p><span className="whitespace-nowrap text-xs font-semibold text-kredo-muted">{statusLabels[client.status]}</span></div>
-            <div className="mt-2 grid grid-cols-3 gap-2 text-xs">
-              <div><p className="text-kredo-muted">Capital</p><p className="font-semibold">{formatMoney(client.balance?.principal_balance_cents ?? 0)}</p></div>
-              <div><p className="text-kredo-muted">Interés</p><p className="font-semibold">{formatMoney(client.balance?.interest_balance_cents ?? 0)}</p></div>
-              <div><p className="text-kredo-muted">Total</p><p className="font-bold">{formatMoney(client.balance?.total_balance_cents ?? 0)}</p></div>
-            </div>
-          </div>
-        ))}
-      </section>
-      <section className="mt-4 rounded-md bg-kredo-surface p-4">
-        <p className="text-xs font-semibold uppercase tracking-[0.12em] text-kredo-muted">Totales de la etiqueta · {allClients.length} clientes</p>
-        <div className="mt-2 grid grid-cols-3 gap-2 text-sm">
-          <div><p className="text-kredo-muted">Capital</p><p className="font-semibold">{formatMoney(totals.principal)}</p></div>
-          <div><p className="text-kredo-muted">Interés</p><p className="font-semibold">{formatMoney(totals.interest)}</p></div>
-          <div><p className="text-kredo-muted">Total</p><p className="font-bold">{formatMoney(totals.total)}</p></div>
-        </div>
-      </section>
-      <p className="mt-4 text-center text-[11px] text-kredo-muted">Resumen generado desde Kredo.</p>
+
+      <table style={{ borderCollapse: "collapse", marginTop: "24px", tableLayout: "fixed", width: "100%" }}>
+        <thead>
+          <tr style={{ background: "#f7f8fb" }}>
+            <th style={{ ...headingCell, width: "34%" }}>Nombre</th>
+            <th style={{ ...amountHeadingCell, width: "20%" }}>Capital</th>
+            <th style={{ ...amountHeadingCell, width: "18%" }}>Interés</th>
+            <th style={{ ...amountHeadingCell, width: "28%" }}>Monto total<br />a pagar</th>
+          </tr>
+        </thead>
+        <tbody>
+          {clients.map((client, index) => (
+            <tr key={client.id} style={{ background: index % 2 === 0 ? "#ffffff" : "#fbfcfe" }}>
+              <td style={{ ...bodyCell, fontWeight: 700 }}>{client.full_name}</td>
+              <td style={amountBodyCell}>{formatMoney(client.balance?.principal_balance_cents ?? 0)}</td>
+              <td style={amountBodyCell}>{formatMoney(client.balance?.interest_balance_cents ?? 0)}</td>
+              <td style={{ ...amountBodyCell, fontWeight: 700 }}>{formatMoney(client.balance?.total_balance_cents ?? 0)}</td>
+            </tr>
+          ))}
+        </tbody>
+        <tfoot>
+          <tr style={{ background: "#eaf1ff" }}>
+            <td style={{ fontSize: "15px", fontWeight: 700, padding: "18px 12px" }}>Total general · {allClients.length} clientes</td>
+            <td style={{ ...amountBodyCell, borderBottom: 0, fontWeight: 700 }}>{formatMoney(totals.principal)}</td>
+            <td style={{ ...amountBodyCell, borderBottom: 0, fontWeight: 700 }}>{formatMoney(totals.interest)}</td>
+            <td style={{ ...amountBodyCell, borderBottom: 0, color: "#1463ff", fontWeight: 800 }}>{formatMoney(totals.total)}</td>
+          </tr>
+        </tfoot>
+      </table>
+
+      <p style={{ color: "#667085", fontSize: "12px", margin: "20px 0 0", textAlign: "center" }}>Resumen generado desde Kredo.</p>
     </article>
   );
 }
@@ -294,7 +320,7 @@ export function ClientsPage() {
       {!isLoading && !error && clients.length === 0 ? <article className="rounded-lg border border-dashed border-kredo-line bg-white p-4 text-sm text-kredo-muted">Aún no hay clientes registrados en esta empresa.</article> : null}
       {!isLoading && !error && clients.length > 0 && filteredClients.length === 0 ? <article className="rounded-lg border border-dashed border-kredo-line bg-white p-4 text-sm text-kredo-muted">No hay clientes que coincidan con la búsqueda y los filtros seleccionados.</article> : null}
 
-      {activeTag ? <div aria-hidden="true" className="pointer-events-none fixed left-[-10000px] top-0">{sharePages.map((page, index) => <div className="mb-4" key={`${activeTag.id}-${index}`} ref={(element) => { sharePageRefs.current[index] = element; }}><TagSharePage allClients={filteredClients} businessName={organization?.name ?? "Kredo"} clients={page} pageNumber={index + 1} pageTotal={sharePages.length} tagName={activeTag.name} /></div>)}</div> : null}
+      {activeTag ? <div aria-hidden="true" className="pointer-events-none fixed left-[-10000px] top-0">{sharePages.map((page, index) => <TagSharePage allClients={filteredClients} businessName={organization?.name ?? "Kredo"} captureRef={(element) => { sharePageRefs.current[index] = element; }} clients={page} key={`${activeTag.id}-${index}`} pageNumber={index + 1} pageTotal={sharePages.length} tagName={activeTag.name} />)}</div> : null}
 
       {managedClient ? <div className="fixed inset-0 z-40 flex items-end bg-black/30 px-4 pb-4"><section aria-labelledby="tag-manager-title" className="w-full rounded-lg border border-kredo-line bg-white p-4 shadow-soft">
         <div className="flex items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-[0.12em] text-kredo-muted">Cliente</p><h2 className="mt-1 text-lg font-bold" id="tag-manager-title">Etiquetas de {managedClient.full_name}</h2></div><button aria-label="Cerrar etiquetas" className="rounded-full border border-kredo-line p-2 text-kredo-muted" onClick={() => setTagManagerClientId(null)} type="button"><X className="h-5 w-5" aria-hidden="true" /></button></div>
