@@ -68,6 +68,11 @@ export async function getDashboardSummary(organizationId?: string) {
     return {
       endDate: projection.endDate,
       grossProfitCents: projectedClients.reduce((total, client) => total + client.interestAmountCents, 0),
+      collectedInterestCents: projectedClients.reduce((total, client) => total + client.collectedInterestCents, 0),
+      pendingInterestCents: projectedClients.reduce((total, client) => total + client.pendingInterestCents, 0),
+      projectedInterestCents: projectedClients
+        .filter((client) => client.status === "projected")
+        .reduce((total, client) => total + client.interestAmountCents, 0),
       clients: projectedClients,
     };
   });

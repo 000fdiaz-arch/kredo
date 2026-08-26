@@ -33,6 +33,25 @@ export type ClientInterestStatus = {
   nextCloseDate: string;
 };
 
+export type ProjectedInterestStatus = "paid" | "pending" | "projected";
+
+export function calculateGeneratedInterestCollection(
+  targetInterestCents: number,
+  priorInterestCents: number,
+  paidInterestCents: number,
+) {
+  const collectedInterestCents = Math.min(
+    targetInterestCents,
+    Math.max(paidInterestCents - priorInterestCents, 0),
+  );
+
+  return {
+    collectedInterestCents,
+    pendingInterestCents: Math.max(targetInterestCents - collectedInterestCents, 0),
+    status: collectedInterestCents >= targetInterestCents ? "paid" as const : "pending" as const,
+  };
+}
+
 export function calculateCycleInterest(
   loans: InterestLoan[],
   payments: InterestPayment[],
@@ -116,7 +135,7 @@ export async function getProjectedInterestForUpcomingCycles(
     .lt("loan_date", lastEndDate);
   let paymentsQuery = (supabase as any)
     .from("payments")
-    .select("client_id, payment_date, principal_amount_cents, voided_at")
+    .select("client_id, payment_date, principal_amount_cents, interest_amount_cents, voided_at")
     .is("voided_at", null)
     .lte("payment_date", asOfDate);
   let freezeQuery = (supabase as any)
@@ -127,12 +146,12 @@ export async function getProjectedInterestForUpcomingCycles(
     .select("client_id, loan_id, effective_date, interest_rate_bps, reason, created_at");
   let chargesQuery = (supabase as any)
     .from("interest_charges")
-    .select("client_id, cycle_id")
+    .select("client_id, cycle_id, interest_amount_cents")
     .is("voided_at", null);
   let cyclesQuery = (supabase as any)
     .from("cycles")
     .select("id, end_date")
-    .in("end_date", endDates);
+    .lte("end_date", lastEndDate);
 
   if (organizationId) {
     loansQuery = loansQuery.eq("organization_id", organizationId);
@@ -160,9 +179,10 @@ export async function getProjectedInterestForUpcomingCycles(
   if (cyclesResult.error) throw cyclesResult.error;
 
   type ProjectedLoan = InterestLoan & { client_id: string };
-  type ProjectedPayment = InterestPayment & { client_id: string };
+  type ProjectedPayment = InterestPayment & { client_id: string; interest_amount_cents: number };
   type ProjectedFreeze = InterestFreezeEvent & { client_id: string };
   type ProjectedRate = InterestRateChange & { client_id: string };
+  type ProjectedCharge = { client_id: string; cycle_id: string; interest_amount_cents: number };
   const loans = (loansResult.data ?? []) as ProjectedLoan[];
   const payments = (paymentsResult.data ?? []) as ProjectedPayment[];
   const freezeEvents = (freezeResult.data ?? []) as ProjectedFreeze[];
@@ -170,18 +190,42 @@ export async function getProjectedInterestForUpcomingCycles(
   const cycleEndDatesById = new Map(
     ((cyclesResult.data ?? []) as Array<{ id: string; end_date: string }>).map((cycle) => [cycle.id, cycle.end_date]),
   );
-  const generatedCloseKeys = new Set(
-    ((chargesResult.data ?? []) as Array<{ client_id: string; cycle_id: string }>).flatMap((charge) => {
-      const endDate = cycleEndDatesById.get(charge.cycle_id);
-      return endDate ? [`${charge.client_id}:${endDate}`] : [];
-    }),
-  );
+  const charges = (chargesResult.data ?? []) as ProjectedCharge[];
   const clientIds = [...new Set(loans.map((loan) => loan.client_id))];
 
   return endDates.map((endDate) => {
     const clients = clientIds
-      .filter((clientId) => !generatedCloseKeys.has(`${clientId}:${endDate}`))
       .map((clientId) => {
+        const clientCharges = charges.filter((charge) => charge.client_id === clientId);
+        const generatedInterestCents = clientCharges
+          .filter((charge) => cycleEndDatesById.get(charge.cycle_id) === endDate)
+          .reduce((total, charge) => total + charge.interest_amount_cents, 0);
+
+        if (generatedInterestCents > 0) {
+          const priorInterestCents = clientCharges
+            .filter((charge) => {
+              const chargeEndDate = cycleEndDatesById.get(charge.cycle_id);
+              return Boolean(chargeEndDate && chargeEndDate < endDate);
+            })
+            .reduce((total, charge) => total + charge.interest_amount_cents, 0);
+          const paidInterestCents = payments
+            .filter((payment) => payment.client_id === clientId)
+            .reduce((total, payment) => total + payment.interest_amount_cents, 0);
+          const collection = calculateGeneratedInterestCollection(
+            generatedInterestCents,
+            priorInterestCents,
+            paidInterestCents,
+          );
+
+          return {
+            clientId,
+            principalBaseCents: 0,
+            interestAmountCents: generatedInterestCents,
+            weightedRateBps: 0,
+            ...collection,
+          };
+        }
+
         const projection = calculateProjectedClientInterest(
           loans.filter((loan) => loan.client_id === clientId),
           payments.filter((payment) => payment.client_id === clientId),
@@ -190,14 +234,25 @@ export async function getProjectedInterestForUpcomingCycles(
           rateChanges.filter((change) => change.client_id === clientId),
         );
 
-        return { clientId, ...projection };
+        return {
+          clientId,
+          ...projection,
+          collectedInterestCents: 0,
+          pendingInterestCents: 0,
+          status: "projected" as const,
+        };
       })
-      .filter((client) => client.principalBaseCents > 0 && client.interestAmountCents > 0);
+      .filter((client) => client.interestAmountCents > 0);
 
     return {
       endDate,
       clients,
       totalInterestCents: clients.reduce((total, client) => total + client.interestAmountCents, 0),
+      collectedInterestCents: clients.reduce((total, client) => total + client.collectedInterestCents, 0),
+      pendingInterestCents: clients.reduce((total, client) => total + client.pendingInterestCents, 0),
+      projectedInterestCents: clients
+        .filter((client) => client.status === "projected")
+        .reduce((total, client) => total + client.interestAmountCents, 0),
     };
   });
 }

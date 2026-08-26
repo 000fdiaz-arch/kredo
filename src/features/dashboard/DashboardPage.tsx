@@ -107,15 +107,20 @@ function buildMetricDetail(metric: MetricKey, data: DashboardData, projectedEndD
     const clientRows = (projection?.clients ?? []).map((client) => ({
       label: client.fullName,
       value: formatMoney(client.interestAmountCents),
+      badge: client.status === "paid"
+        ? { label: "Ya pagó", tone: "success" as const }
+        : client.status === "pending"
+          ? { label: "Pendiente", tone: "warning" as const }
+          : { label: "Proyectado", tone: "info" as const },
     }));
 
     return {
       title: "Ganancia bruta estimada",
       value: formatMoney(projection?.grossProfitCents ?? 0),
-      description: `Es el interés todavía no generado que producirían los saldos actuales en el cierre del ${projection?.endDate ?? "próximo ciclo"}.`,
-      formula: "Capital pendiente de cada préstamo × tasa aplicable",
+      description: `Es la ganancia total estimada del ciclo que cierra el ${projection?.endDate ?? "próximo ciclo"}. Incluye lo cobrado, lo pendiente y lo que falta por generar.`,
+      formula: `Ya cobrado ${formatMoney(projection?.collectedInterestCents ?? 0)} + pendiente ${formatMoney(projection?.pendingInterestCents ?? 0)} + por generar ${formatMoney(projection?.projectedInterestCents ?? 0)}`,
       rows: clientRows.length > 0 ? clientRows : [{ label: "Interés proyectado", value: formatMoney(0) }],
-      note: "Es una estimación bruta. Puede cambiar con pagos, préstamos nuevos, cambios de tasa o intereses congelados; no descuenta gastos ni pérdidas futuras.",
+      note: "Cada cliente aparece una sola vez. Ya pagó indica interés cobrado; Pendiente indica un cargo generado sin completar; Proyectado todavía puede cambiar antes del cierre.",
       action: { label: "Ver clientes", to: "/clients" },
     };
   }
@@ -632,6 +637,12 @@ export function DashboardPage() {
               })}
             </div>
 
+            <div className="mt-3 grid grid-cols-3 gap-2 text-center text-[11px] text-kredo-muted">
+              <div><span className="block">Ya cobrado</span><strong className="text-kredo-ink">{formatMoney(selectedProjection?.collectedInterestCents ?? 0)}</strong></div>
+              <div><span className="block">Pendiente</span><strong className="text-kredo-ink">{formatMoney(selectedProjection?.pendingInterestCents ?? 0)}</strong></div>
+              <div><span className="block">Por generar</span><strong className="text-kredo-ink">{formatMoney(selectedProjection?.projectedInterestCents ?? 0)}</strong></div>
+            </div>
+
             <button
               className="mt-4 inline-flex min-h-11 w-full items-center justify-center gap-1 rounded-md border border-sky-200 bg-white px-3 text-sm font-semibold text-sky-700 hover:bg-sky-50"
               onClick={() => setSelectedMetric("projection")}
@@ -640,7 +651,7 @@ export function DashboardPage() {
               Ver desglose <ChevronRight className="h-4 w-4" aria-hidden="true" />
             </button>
             <p className="mt-4 text-xs leading-5 text-kredo-muted">
-              Proyección de intereses con los saldos y tasas actuales. No incluye gastos futuros.
+              Total estimado del ciclo con los saldos y tasas actuales. No incluye gastos futuros.
             </p>
           </article>
         </div>

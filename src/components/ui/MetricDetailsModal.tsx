@@ -7,7 +7,11 @@ export type MetricDetail = {
   value: string;
   description: string;
   formula?: string;
-  rows?: Array<{ label: string; value: string }>;
+  rows?: Array<{
+    label: string;
+    value: string;
+    badge?: { label: string; tone: "success" | "warning" | "info" };
+  }>;
   note?: string;
   action?: { label: string; to: string };
 };
@@ -66,7 +70,20 @@ export function MetricDetailsModal({ detail, onClose }: MetricDetailsModalProps)
           <dl className="mt-4 divide-y divide-kredo-line rounded-lg border border-kredo-line px-3">
             {detail.rows.map((row, index) => (
               <div className="flex items-center justify-between gap-4 py-3 text-sm" key={`${row.label}-${index}`}>
-                <dt className="text-kredo-muted">{row.label}</dt>
+                <dt className="min-w-0 text-kredo-muted">
+                  <span className="block truncate">{row.label}</span>
+                  {row.badge ? (
+                    <span className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
+                      row.badge.tone === "success"
+                        ? "bg-emerald-100 text-emerald-700"
+                        : row.badge.tone === "warning"
+                          ? "bg-amber-100 text-amber-800"
+                          : "bg-sky-100 text-sky-700"
+                    }`}>
+                      {row.badge.label}
+                    </span>
+                  ) : null}
+                </dt>
                 <dd className="text-right font-semibold text-kredo-ink">{row.value}</dd>
               </div>
             ))}

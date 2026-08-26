@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calculateCycleInterest, calculateProjectedClientInterest, getUpcomingProjectionEndDates, listPaymentInterestCycleRanges } from "@/services/interest.service";
+import { calculateCycleInterest, calculateGeneratedInterestCollection, calculateProjectedClientInterest, getUpcomingProjectionEndDates, listPaymentInterestCycleRanges } from "@/services/interest.service";
 import type { Database } from "@/types/database";
 
 type LoanRow = Database["public"]["Tables"]["loans"]["Row"];
@@ -175,6 +175,24 @@ describe("calculateProjectedClientInterest", () => {
     );
 
     expect(projection.interestAmountCents).toBe(0);
+  });
+});
+
+describe("calculateGeneratedInterestCollection", () => {
+  it("marks a generated cycle as paid after older interest is covered", () => {
+    expect(calculateGeneratedInterestCollection(790, 1_000, 1_790)).toEqual({
+      collectedInterestCents: 790,
+      pendingInterestCents: 0,
+      status: "paid",
+    });
+  });
+
+  it("keeps the unpaid portion of a generated cycle pending", () => {
+    expect(calculateGeneratedInterestCollection(1_000, 500, 900)).toEqual({
+      collectedInterestCents: 400,
+      pendingInterestCents: 600,
+      status: "pending",
+    });
   });
 });
 
