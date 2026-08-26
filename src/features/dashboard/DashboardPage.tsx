@@ -50,7 +50,7 @@ function AnimatedMoney({ className, value }: AnimatedMoneyProps) {
   return <p className={className}>{formatMoney(displayValue)}</p>;
 }
 
-function buildMetricDetail(metric: MetricKey, data: DashboardData): MetricDetail {
+function buildMetricDetail(metric: MetricKey, data: DashboardData, projectedEndDate?: string): MetricDetail {
   if (metric === "total") {
     return {
       title: "Dinero total",
@@ -103,15 +103,16 @@ function buildMetricDetail(metric: MetricKey, data: DashboardData): MetricDetail
   }
 
   if (metric === "projection") {
-    const clientRows = data.projectedClients.map((client) => ({
+    const projection = data.projectedCycles.find((cycle) => cycle.endDate === projectedEndDate) ?? data.projectedCycles[0];
+    const clientRows = (projection?.clients ?? []).map((client) => ({
       label: client.fullName,
       value: formatMoney(client.interestAmountCents),
     }));
 
     return {
       title: "Ganancia bruta estimada",
-      value: formatMoney(data.projectedGrossProfitCents),
-      description: `Es el interés que generarían los saldos actuales en el cierre del ${data.projectedProfitEndDate}.`,
+      value: formatMoney(projection?.grossProfitCents ?? 0),
+      description: `Es el interés todavía no generado que producirían los saldos actuales en el cierre del ${projection?.endDate ?? "próximo ciclo"}.`,
       formula: "Capital pendiente de cada préstamo × tasa aplicable",
       rows: clientRows.length > 0 ? clientRows : [{ label: "Interés proyectado", value: formatMoney(0) }],
       note: "Es una estimación bruta. Puede cambiar con pagos, préstamos nuevos, cambios de tasa o intereses congelados; no descuenta gastos ni pérdidas futuras.",
@@ -415,6 +416,7 @@ export function DashboardPage() {
   const [selectedMetric, setSelectedMetric] = useState<MetricKey | null>(null);
   const [cycleHistoryOpen, setCycleHistoryOpen] = useState(false);
   const [withdrawalOpen, setWithdrawalOpen] = useState(false);
+  const [selectedProjectionEndDate, setSelectedProjectionEndDate] = useState<string | null>(null);
   const { data, isLoading, error } = useQuery({
     enabled: Boolean(organizationId),
     queryKey: ["dashboard-summary", organizationId],
@@ -432,6 +434,8 @@ export function DashboardPage() {
   const cashPercent = distributionTotalCents > 0 ? 100 - lentPercent : 0;
   const remainingAccumulatedProfitCents = Math.max((data?.netProfitCents ?? 0) - (data?.totalProfitWithdrawnCents ?? 0), 0);
   const withdrawableProfitCents = Math.min(remainingAccumulatedProfitCents, positiveCashCents);
+  const selectedProjection = data?.projectedCycles.find((cycle) => cycle.endDate === selectedProjectionEndDate)
+    ?? data?.projectedCycles[0];
   const withdrawalMutation = useMutation({
     mutationFn: (amountCents: number) => {
       if (!user || !organizationId) throw new Error("No se pudo identificar la empresa.");
@@ -592,32 +596,58 @@ export function DashboardPage() {
             ) : null}
           </article>
 
-          <button
-            aria-label="Ver cómo se calcula la ganancia estimada del próximo ciclo"
-            className="kredo-rise kredo-rise-delay-2 w-full rounded-2xl border border-sky-200 bg-gradient-to-br from-sky-50 to-white p-5 text-left transition-transform duration-200 hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-kredo-primary"
-            onClick={() => setSelectedMetric("projection")}
-            type="button"
-          >
+          <article className="kredo-rise kredo-rise-delay-2 w-full rounded-2xl border border-sky-200 bg-gradient-to-br from-sky-50 to-white p-5">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <div className="mb-4 inline-flex h-10 w-10 items-center justify-center rounded-xl bg-sky-100 text-sky-700">
                   <TrendingUp className="h-5 w-5" aria-hidden="true" />
                 </div>
                 <p className="text-sm font-semibold text-kredo-muted">Ganancia bruta estimada</p>
-                <AnimatedMoney className="mt-2 text-3xl font-bold tracking-tight text-kredo-ink" value={data.projectedGrossProfitCents} />
-                <p className="mt-1 text-xs text-kredo-muted">Próximo cierre: {data.projectedProfitEndDate}</p>
+                <AnimatedMoney className="mt-2 text-3xl font-bold tracking-tight text-kredo-ink" value={selectedProjection?.grossProfitCents ?? 0} />
+                <p className="mt-1 text-xs text-kredo-muted">Cierre seleccionado: {selectedProjection?.endDate}</p>
               </div>
-              <ChevronRight className="mt-2 h-5 w-5 shrink-0 text-sky-700" aria-hidden="true" />
             </div>
+
+            <div className="mt-4 grid grid-cols-3 gap-2" aria-label="Ciclos proyectados">
+              {data.projectedCycles.map((cycle) => {
+                const isSelected = cycle.endDate === selectedProjection?.endDate;
+
+                return (
+                  <button
+                    aria-pressed={isSelected}
+                    className={`min-h-16 rounded-lg border px-2 py-2 text-center transition-colors ${
+                      isSelected
+                        ? "border-sky-600 bg-sky-600 text-white"
+                        : "border-sky-200 bg-white text-sky-800 hover:bg-sky-50"
+                    }`}
+                    key={cycle.endDate}
+                    onClick={() => setSelectedProjectionEndDate(cycle.endDate)}
+                    type="button"
+                  >
+                    <span className="block text-[10px] font-semibold uppercase tracking-wide opacity-80">Cierre</span>
+                    <span className="block text-xs font-bold">{cycle.endDate}</span>
+                    <span className="mt-1 block text-xs font-semibold">{formatMoney(cycle.grossProfitCents)}</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            <button
+              className="mt-4 inline-flex min-h-11 w-full items-center justify-center gap-1 rounded-md border border-sky-200 bg-white px-3 text-sm font-semibold text-sky-700 hover:bg-sky-50"
+              onClick={() => setSelectedMetric("projection")}
+              type="button"
+            >
+              Ver desglose <ChevronRight className="h-4 w-4" aria-hidden="true" />
+            </button>
             <p className="mt-4 text-xs leading-5 text-kredo-muted">
               Proyección de intereses con los saldos y tasas actuales. No incluye gastos futuros.
             </p>
-          </button>
+          </article>
         </div>
       ) : null}
 
       {data && selectedMetric ? (
-        <MetricDetailsModal detail={buildMetricDetail(selectedMetric, data)} onClose={() => setSelectedMetric(null)} />
+        <MetricDetailsModal detail={buildMetricDetail(selectedMetric, data, selectedProjection?.endDate)} onClose={() => setSelectedMetric(null)} />
       ) : null}
 
       {withdrawalOpen ? (

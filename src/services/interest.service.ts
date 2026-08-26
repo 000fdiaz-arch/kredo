@@ -89,50 +89,75 @@ export function calculateProjectedClientInterest(
   return calculateCycleInterest(loans, payments, endDate, rateChanges);
 }
 
-export function getProjectedCycleEndDate(asOfDate = toDateInputValue()) {
-  return getNextCycleRange(asOfDate).endDate;
+export function getUpcomingProjectionEndDates(asOfDate = toDateInputValue(), count = 3) {
+  if (!Number.isInteger(count) || count <= 0) return [];
+
+  const endDates = [getNextCloseDate(asOfDate)];
+  while (endDates.length < count) {
+    endDates.push(getNextCycleRange(endDates[endDates.length - 1]).endDate);
+  }
+
+  return endDates;
 }
 
-export async function getProjectedInterestForNextCycle(
+export async function getProjectedInterestForUpcomingCycles(
   organizationId?: string,
   asOfDate = toDateInputValue(),
+  count = 3,
 ) {
-  const endDate = getProjectedCycleEndDate(asOfDate);
+  const endDates = getUpcomingProjectionEndDates(asOfDate, count);
+  const lastEndDate = endDates[endDates.length - 1];
+  if (!lastEndDate) return [];
+
   let loansQuery = (supabase as any)
     .from("loans")
     .select("id, client_id, loan_date, principal_amount_cents, interest_rate_bps, created_at, voided_at")
     .is("voided_at", null)
-    .lt("loan_date", endDate);
+    .lt("loan_date", lastEndDate);
   let paymentsQuery = (supabase as any)
     .from("payments")
     .select("client_id, payment_date, principal_amount_cents, voided_at")
     .is("voided_at", null)
-    .lte("payment_date", endDate);
+    .lte("payment_date", asOfDate);
   let freezeQuery = (supabase as any)
     .from("client_interest_freeze_events")
     .select("client_id, action, effective_date, reason, created_at");
   let rateQuery = (supabase as any)
     .from("loan_interest_rate_changes")
     .select("client_id, loan_id, effective_date, interest_rate_bps, reason, created_at");
+  let chargesQuery = (supabase as any)
+    .from("interest_charges")
+    .select("client_id, cycle_id")
+    .is("voided_at", null);
+  let cyclesQuery = (supabase as any)
+    .from("cycles")
+    .select("id, end_date")
+    .in("end_date", endDates);
 
   if (organizationId) {
     loansQuery = loansQuery.eq("organization_id", organizationId);
     paymentsQuery = paymentsQuery.eq("organization_id", organizationId);
     freezeQuery = freezeQuery.eq("organization_id", organizationId);
     rateQuery = rateQuery.eq("organization_id", organizationId);
+    chargesQuery = chargesQuery.eq("organization_id", organizationId);
+    cyclesQuery = cyclesQuery.eq("organization_id", organizationId);
   }
 
-  const [loansResult, paymentsResult, freezeResult, rateResult] = await Promise.all([
+  const [loansResult, paymentsResult, freezeResult, rateResult, chargesResult, cyclesResult] = await Promise.all([
     loansQuery,
     paymentsQuery,
     freezeQuery,
     rateQuery,
+    chargesQuery,
+    cyclesQuery,
   ]);
 
   if (loansResult.error) throw loansResult.error;
   if (paymentsResult.error) throw paymentsResult.error;
   if (freezeResult.error) throw freezeResult.error;
   if (rateResult.error) throw rateResult.error;
+  if (chargesResult.error) throw chargesResult.error;
+  if (cyclesResult.error) throw cyclesResult.error;
 
   type ProjectedLoan = InterestLoan & { client_id: string };
   type ProjectedPayment = InterestPayment & { client_id: string };
@@ -142,24 +167,39 @@ export async function getProjectedInterestForNextCycle(
   const payments = (paymentsResult.data ?? []) as ProjectedPayment[];
   const freezeEvents = (freezeResult.data ?? []) as ProjectedFreeze[];
   const rateChanges = (rateResult.data ?? []) as ProjectedRate[];
+  const cycleEndDatesById = new Map(
+    ((cyclesResult.data ?? []) as Array<{ id: string; end_date: string }>).map((cycle) => [cycle.id, cycle.end_date]),
+  );
+  const generatedCloseKeys = new Set(
+    ((chargesResult.data ?? []) as Array<{ client_id: string; cycle_id: string }>).flatMap((charge) => {
+      const endDate = cycleEndDatesById.get(charge.cycle_id);
+      return endDate ? [`${charge.client_id}:${endDate}`] : [];
+    }),
+  );
   const clientIds = [...new Set(loans.map((loan) => loan.client_id))];
-  const clients = clientIds.map((clientId) => {
-    const projection = calculateProjectedClientInterest(
-      loans.filter((loan) => loan.client_id === clientId),
-      payments.filter((payment) => payment.client_id === clientId),
+
+  return endDates.map((endDate) => {
+    const clients = clientIds
+      .filter((clientId) => !generatedCloseKeys.has(`${clientId}:${endDate}`))
+      .map((clientId) => {
+        const projection = calculateProjectedClientInterest(
+          loans.filter((loan) => loan.client_id === clientId),
+          payments.filter((payment) => payment.client_id === clientId),
+          endDate,
+          freezeEvents.filter((event) => event.client_id === clientId),
+          rateChanges.filter((change) => change.client_id === clientId),
+        );
+
+        return { clientId, ...projection };
+      })
+      .filter((client) => client.principalBaseCents > 0 && client.interestAmountCents > 0);
+
+    return {
       endDate,
-      freezeEvents.filter((event) => event.client_id === clientId),
-      rateChanges.filter((change) => change.client_id === clientId),
-    );
-
-    return { clientId, ...projection };
-  }).filter((client) => client.principalBaseCents > 0 && client.interestAmountCents > 0);
-
-  return {
-    endDate,
-    clients,
-    totalInterestCents: clients.reduce((total, client) => total + client.interestAmountCents, 0),
-  };
+      clients,
+      totalInterestCents: clients.reduce((total, client) => total + client.interestAmountCents, 0),
+    };
+  });
 }
 
 async function listClientLoans(clientId: string) {

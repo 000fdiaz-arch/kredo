@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calculateCycleInterest, calculateProjectedClientInterest, getProjectedCycleEndDate, listPaymentInterestCycleRanges } from "@/services/interest.service";
+import { calculateCycleInterest, calculateProjectedClientInterest, getUpcomingProjectionEndDates, listPaymentInterestCycleRanges } from "@/services/interest.service";
 import type { Database } from "@/types/database";
 
 type LoanRow = Database["public"]["Tables"]["loans"]["Row"];
@@ -178,12 +178,20 @@ describe("calculateProjectedClientInterest", () => {
   });
 });
 
-describe("getProjectedCycleEndDate", () => {
-  it("projects the cycle after the current one instead of the current upcoming close", () => {
-    expect(getProjectedCycleEndDate("2026-08-26")).toBe("2026-09-15");
+describe("getUpcomingProjectionEndDates", () => {
+  it("lists the next three closing dates beginning with the upcoming close", () => {
+    expect(getUpcomingProjectionEndDates("2026-08-26")).toEqual([
+      "2026-08-30",
+      "2026-09-15",
+      "2026-09-30",
+    ]);
   });
 
-  it("moves from a closing day to the following cycle", () => {
-    expect(getProjectedCycleEndDate("2026-08-30")).toBe("2026-09-15");
+  it("includes today when today is a closing day", () => {
+    expect(getUpcomingProjectionEndDates("2026-08-30")).toEqual([
+      "2026-08-30",
+      "2026-09-15",
+      "2026-09-30",
+    ]);
   });
 });

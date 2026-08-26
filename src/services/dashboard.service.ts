@@ -2,7 +2,7 @@ import { listClientsWithBalances } from "@/services/clients.service";
 import { getNextCloseDate } from "@/lib/dates";
 import { getCurrentCyclePaymentBreakdown } from "@/services/cycle-payments.service";
 import { getFinancialIndicators } from "@/services/financial-movements.service";
-import { generateDueInterestForAllClients, getProjectedInterestForNextCycle } from "@/services/interest.service";
+import { generateDueInterestForAllClients, getProjectedInterestForUpcomingCycles } from "@/services/interest.service";
 import type { ClientWithBalance } from "@/services/clients.service";
 
 const statusPriority = {
@@ -43,10 +43,10 @@ function sortClientsByUrgency(clients: ClientWithBalance[]) {
 export async function getDashboardSummary(organizationId?: string) {
   await generateDueInterestForAllClients(organizationId);
 
-  const [clients, cyclePayments, projection] = await Promise.all([
+  const [clients, cyclePayments, projections] = await Promise.all([
     listClientsWithBalances(),
     getCurrentCyclePaymentBreakdown(),
-    getProjectedInterestForNextCycle(organizationId),
+    getProjectedInterestForUpcomingCycles(organizationId),
   ]);
 
   const activeClients = clients.filter((client) => client.status !== "inactive");
@@ -56,13 +56,21 @@ export async function getDashboardSummary(organizationId?: string) {
   const totalPortfolioCents = clients.reduce((total, client) => total + (client.balance?.total_balance_cents ?? 0), 0);
   const financial = await getFinancialIndicators(activePortfolioCents);
   const clientsById = new Map(clients.map((client) => [client.id, client]));
-  const projectedClients = projection.clients
-    .filter((projectedClient) => clientsById.get(projectedClient.clientId)?.status !== "inactive")
-    .map((projectedClient) => ({
-      ...projectedClient,
-      fullName: clientsById.get(projectedClient.clientId)?.full_name ?? "Cliente",
-    }))
-    .sort((first, second) => second.interestAmountCents - first.interestAmountCents || first.fullName.localeCompare(second.fullName));
+  const projectedCycles = projections.map((projection) => {
+    const projectedClients = projection.clients
+      .filter((projectedClient) => clientsById.get(projectedClient.clientId)?.status !== "inactive")
+      .map((projectedClient) => ({
+        ...projectedClient,
+        fullName: clientsById.get(projectedClient.clientId)?.full_name ?? "Cliente",
+      }))
+      .sort((first, second) => second.interestAmountCents - first.interestAmountCents || first.fullName.localeCompare(second.fullName));
+
+    return {
+      endDate: projection.endDate,
+      grossProfitCents: projectedClients.reduce((total, client) => total + client.interestAmountCents, 0),
+      clients: projectedClients,
+    };
+  });
 
   return {
     clients: sortClientsByUrgency(clients),
@@ -102,8 +110,6 @@ export async function getDashboardSummary(organizationId?: string) {
     cyclePaymentsCents: cyclePayments.totalPaymentsCents,
     cycleInterestCollectedCents: cyclePayments.interestCollectedCents,
     nextCloseDate: getNextCloseDate(),
-    projectedProfitEndDate: projection.endDate,
-    projectedGrossProfitCents: projectedClients.reduce((total, client) => total + client.interestAmountCents, 0),
-    projectedClients,
+    projectedCycles,
   };
 }
