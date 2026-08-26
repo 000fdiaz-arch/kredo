@@ -2,7 +2,7 @@ import { listClientsWithBalances } from "@/services/clients.service";
 import { getNextCloseDate } from "@/lib/dates";
 import { getCurrentCyclePaymentBreakdown } from "@/services/cycle-payments.service";
 import { getFinancialIndicators } from "@/services/financial-movements.service";
-import { generateDueInterestForAllClients } from "@/services/interest.service";
+import { generateDueInterestForAllClients, getProjectedInterestForNextCycle } from "@/services/interest.service";
 import type { ClientWithBalance } from "@/services/clients.service";
 
 const statusPriority = {
@@ -40,12 +40,13 @@ function sortClientsByUrgency(clients: ClientWithBalance[]) {
   });
 }
 
-export async function getDashboardSummary() {
-  await generateDueInterestForAllClients();
+export async function getDashboardSummary(organizationId?: string) {
+  await generateDueInterestForAllClients(organizationId);
 
-  const [clients, cyclePayments] = await Promise.all([
+  const [clients, cyclePayments, projection] = await Promise.all([
     listClientsWithBalances(),
     getCurrentCyclePaymentBreakdown(),
+    getProjectedInterestForNextCycle(organizationId),
   ]);
 
   const activeClients = clients.filter((client) => client.status !== "inactive");
@@ -54,6 +55,14 @@ export async function getDashboardSummary() {
   const pendingInterestCents = clients.reduce((total, client) => total + (client.balance?.interest_balance_cents ?? 0), 0);
   const totalPortfolioCents = clients.reduce((total, client) => total + (client.balance?.total_balance_cents ?? 0), 0);
   const financial = await getFinancialIndicators(activePortfolioCents);
+  const clientsById = new Map(clients.map((client) => [client.id, client]));
+  const projectedClients = projection.clients
+    .filter((projectedClient) => clientsById.get(projectedClient.clientId)?.status !== "inactive")
+    .map((projectedClient) => ({
+      ...projectedClient,
+      fullName: clientsById.get(projectedClient.clientId)?.full_name ?? "Cliente",
+    }))
+    .sort((first, second) => second.interestAmountCents - first.interestAmountCents || first.fullName.localeCompare(second.fullName));
 
   return {
     clients: sortClientsByUrgency(clients),
@@ -93,5 +102,8 @@ export async function getDashboardSummary() {
     cyclePaymentsCents: cyclePayments.totalPaymentsCents,
     cycleInterestCollectedCents: cyclePayments.interestCollectedCents,
     nextCloseDate: getNextCloseDate(),
+    projectedProfitEndDate: projection.endDate,
+    projectedGrossProfitCents: projectedClients.reduce((total, client) => total + client.interestAmountCents, 0),
+    projectedClients,
   };
 }

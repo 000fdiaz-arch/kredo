@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calculateCycleInterest, listPaymentInterestCycleRanges } from "@/services/interest.service";
+import { calculateCycleInterest, calculateProjectedClientInterest, listPaymentInterestCycleRanges } from "@/services/interest.service";
 import type { Database } from "@/types/database";
 
 type LoanRow = Database["public"]["Tables"]["loans"]["Row"];
@@ -151,5 +151,29 @@ describe("listPaymentInterestCycleRanges", () => {
     expect(listPaymentInterestCycleRanges("2026-08-01", "2026-08-15")).toEqual([
       { startDate: "2026-08-01", endDate: "2026-08-15" },
     ]);
+  });
+});
+
+describe("calculateProjectedClientInterest", () => {
+  it("projects interest from the current principal and rate", () => {
+    const projection = calculateProjectedClientInterest(
+      [loan({ loan_date: "2026-08-01", principal_amount_cents: 25_000, interest_rate_bps: 1_000 })],
+      [payment({ payment_date: "2026-08-10", principal_amount_cents: 5_000 })],
+      "2026-08-15",
+    );
+
+    expect(projection.principalBaseCents).toBe(20_000);
+    expect(projection.interestAmountCents).toBe(2_000);
+  });
+
+  it("does not project interest while the client is frozen", () => {
+    const projection = calculateProjectedClientInterest(
+      [loan({ loan_date: "2026-08-01", principal_amount_cents: 25_000, interest_rate_bps: 1_000 })],
+      [],
+      "2026-08-15",
+      [{ action: "freeze", effective_date: "2026-08-10", created_at: "2026-08-10T12:00:00.000Z" }],
+    );
+
+    expect(projection.interestAmountCents).toBe(0);
   });
 });

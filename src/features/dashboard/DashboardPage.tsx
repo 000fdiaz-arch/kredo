@@ -15,7 +15,7 @@ import {
 } from "@/services/financial-movements.service";
 
 type DashboardData = Awaited<ReturnType<typeof getDashboardSummary>>;
-type MetricKey = "total" | "lent" | "cash" | "profit";
+type MetricKey = "total" | "lent" | "cash" | "profit" | "projection";
 
 type AnimatedMoneyProps = {
   className: string;
@@ -99,6 +99,23 @@ function buildMetricDetail(metric: MetricKey, data: DashboardData): MetricDetail
       note: data.cycleProfitWithdrawnCents > 0
         ? `Durante este ciclo se registraron retiros de utilidad por ${formatMoney(data.cycleProfitWithdrawnCents)}.`
         : "Durante este ciclo no se registraron retiros de utilidad.",
+    };
+  }
+
+  if (metric === "projection") {
+    const clientRows = data.projectedClients.map((client) => ({
+      label: client.fullName,
+      value: formatMoney(client.interestAmountCents),
+    }));
+
+    return {
+      title: "Ganancia bruta estimada",
+      value: formatMoney(data.projectedGrossProfitCents),
+      description: `Es el interés que generarían los saldos actuales en el cierre del ${data.projectedProfitEndDate}.`,
+      formula: "Capital pendiente de cada préstamo × tasa aplicable",
+      rows: clientRows.length > 0 ? clientRows : [{ label: "Interés proyectado", value: formatMoney(0) }],
+      note: "Es una estimación bruta. Puede cambiar con pagos, préstamos nuevos, cambios de tasa o intereses congelados; no descuenta gastos ni pérdidas futuras.",
+      action: { label: "Ver clientes", to: "/clients" },
     };
   }
 
@@ -399,8 +416,9 @@ export function DashboardPage() {
   const [cycleHistoryOpen, setCycleHistoryOpen] = useState(false);
   const [withdrawalOpen, setWithdrawalOpen] = useState(false);
   const { data, isLoading, error } = useQuery({
-    queryKey: ["dashboard-summary"],
-    queryFn: getDashboardSummary,
+    enabled: Boolean(organizationId),
+    queryKey: ["dashboard-summary", organizationId],
+    queryFn: () => getDashboardSummary(organizationId ?? undefined),
   });
   const cycleHistoryQuery = useQuery({
     enabled: cycleHistoryOpen || withdrawalOpen,
@@ -573,6 +591,28 @@ export function DashboardPage() {
               <p className="mt-3 text-xs text-kredo-muted">La utilidad existe, pero todavía no está disponible en caja.</p>
             ) : null}
           </article>
+
+          <button
+            aria-label="Ver cómo se calcula la ganancia estimada del próximo ciclo"
+            className="kredo-rise kredo-rise-delay-2 w-full rounded-2xl border border-sky-200 bg-gradient-to-br from-sky-50 to-white p-5 text-left transition-transform duration-200 hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-kredo-primary"
+            onClick={() => setSelectedMetric("projection")}
+            type="button"
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="mb-4 inline-flex h-10 w-10 items-center justify-center rounded-xl bg-sky-100 text-sky-700">
+                  <TrendingUp className="h-5 w-5" aria-hidden="true" />
+                </div>
+                <p className="text-sm font-semibold text-kredo-muted">Ganancia bruta estimada</p>
+                <AnimatedMoney className="mt-2 text-3xl font-bold tracking-tight text-kredo-ink" value={data.projectedGrossProfitCents} />
+                <p className="mt-1 text-xs text-kredo-muted">Próximo cierre: {data.projectedProfitEndDate}</p>
+              </div>
+              <ChevronRight className="mt-2 h-5 w-5 shrink-0 text-sky-700" aria-hidden="true" />
+            </div>
+            <p className="mt-4 text-xs leading-5 text-kredo-muted">
+              Proyección de intereses con los saldos y tasas actuales. No incluye gastos futuros.
+            </p>
+          </button>
         </div>
       ) : null}
 

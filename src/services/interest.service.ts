@@ -1,10 +1,11 @@
-import { getCycleRange, getNextCloseDate, listDueCycleRanges, toDateInputValue } from "@/lib/dates";
+import { getCycleRange, getNextCloseDate, getNextCycleRange, listDueCycleRanges, toDateInputValue } from "@/lib/dates";
 import { supabase } from "@/lib/supabase";
 import { getOrCreateCycle } from "@/services/cycles.service";
 import {
   getEffectiveInterestRateBps,
   isInterestFrozenAt,
   listClientInterestPolicyData,
+  type InterestFreezeEvent,
   type InterestRateChange,
 } from "@/services/interest-policy.service";
 import type { Database } from "@/types/database";
@@ -71,6 +72,90 @@ export function calculateCycleInterest(
     principalBaseCents,
     interestAmountCents,
     weightedRateBps,
+  };
+}
+
+export function calculateProjectedClientInterest(
+  loans: InterestLoan[],
+  payments: InterestPayment[],
+  endDate: string,
+  freezeEvents: InterestFreezeEvent[] = [],
+  rateChanges: InterestRateChange[] = [],
+) {
+  if (isInterestFrozenAt(freezeEvents, endDate)) {
+    return { principalBaseCents: 0, interestAmountCents: 0, weightedRateBps: 0 };
+  }
+
+  return calculateCycleInterest(loans, payments, endDate, rateChanges);
+}
+
+export async function getProjectedInterestForNextCycle(
+  organizationId?: string,
+  asOfDate = toDateInputValue(),
+) {
+  const nextCloseDate = getNextCloseDate(asOfDate);
+  const endDate = nextCloseDate === asOfDate ? getNextCycleRange(asOfDate).endDate : nextCloseDate;
+  let loansQuery = (supabase as any)
+    .from("loans")
+    .select("id, client_id, loan_date, principal_amount_cents, interest_rate_bps, created_at, voided_at")
+    .is("voided_at", null)
+    .lt("loan_date", endDate);
+  let paymentsQuery = (supabase as any)
+    .from("payments")
+    .select("client_id, payment_date, principal_amount_cents, voided_at")
+    .is("voided_at", null)
+    .lte("payment_date", endDate);
+  let freezeQuery = (supabase as any)
+    .from("client_interest_freeze_events")
+    .select("client_id, action, effective_date, reason, created_at");
+  let rateQuery = (supabase as any)
+    .from("loan_interest_rate_changes")
+    .select("client_id, loan_id, effective_date, interest_rate_bps, reason, created_at");
+
+  if (organizationId) {
+    loansQuery = loansQuery.eq("organization_id", organizationId);
+    paymentsQuery = paymentsQuery.eq("organization_id", organizationId);
+    freezeQuery = freezeQuery.eq("organization_id", organizationId);
+    rateQuery = rateQuery.eq("organization_id", organizationId);
+  }
+
+  const [loansResult, paymentsResult, freezeResult, rateResult] = await Promise.all([
+    loansQuery,
+    paymentsQuery,
+    freezeQuery,
+    rateQuery,
+  ]);
+
+  if (loansResult.error) throw loansResult.error;
+  if (paymentsResult.error) throw paymentsResult.error;
+  if (freezeResult.error) throw freezeResult.error;
+  if (rateResult.error) throw rateResult.error;
+
+  type ProjectedLoan = InterestLoan & { client_id: string };
+  type ProjectedPayment = InterestPayment & { client_id: string };
+  type ProjectedFreeze = InterestFreezeEvent & { client_id: string };
+  type ProjectedRate = InterestRateChange & { client_id: string };
+  const loans = (loansResult.data ?? []) as ProjectedLoan[];
+  const payments = (paymentsResult.data ?? []) as ProjectedPayment[];
+  const freezeEvents = (freezeResult.data ?? []) as ProjectedFreeze[];
+  const rateChanges = (rateResult.data ?? []) as ProjectedRate[];
+  const clientIds = [...new Set(loans.map((loan) => loan.client_id))];
+  const clients = clientIds.map((clientId) => {
+    const projection = calculateProjectedClientInterest(
+      loans.filter((loan) => loan.client_id === clientId),
+      payments.filter((payment) => payment.client_id === clientId),
+      endDate,
+      freezeEvents.filter((event) => event.client_id === clientId),
+      rateChanges.filter((change) => change.client_id === clientId),
+    );
+
+    return { clientId, ...projection };
+  }).filter((client) => client.principalBaseCents > 0 && client.interestAmountCents > 0);
+
+  return {
+    endDate,
+    clients,
+    totalInterestCents: clients.reduce((total, client) => total + client.interestAmountCents, 0),
   };
 }
 
