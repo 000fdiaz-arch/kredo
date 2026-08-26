@@ -89,12 +89,15 @@ export function calculateProjectedClientInterest(
   return calculateCycleInterest(loans, payments, endDate, rateChanges);
 }
 
+export function getProjectedCycleEndDate(asOfDate = toDateInputValue()) {
+  return getNextCycleRange(asOfDate).endDate;
+}
+
 export async function getProjectedInterestForNextCycle(
   organizationId?: string,
   asOfDate = toDateInputValue(),
 ) {
-  const nextCloseDate = getNextCloseDate(asOfDate);
-  const endDate = nextCloseDate === asOfDate ? getNextCycleRange(asOfDate).endDate : nextCloseDate;
+  const endDate = getProjectedCycleEndDate(asOfDate);
   let loansQuery = (supabase as any)
     .from("loans")
     .select("id, client_id, loan_date, principal_amount_cents, interest_rate_bps, created_at, voided_at")
