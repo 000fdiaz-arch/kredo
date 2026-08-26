@@ -238,6 +238,15 @@ export function ClientProfilePage() {
         <div>
           <p className="text-sm text-kredo-muted">Telefono</p>
           <p className="font-semibold">{client.phone ?? "Pendiente"}</p>
+          {client.tags.length > 0 ? (
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              {client.tags.map((tag) => (
+                <span className="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-semibold text-kredo-primary" key={tag.id}>
+                  {tag.name}
+                </span>
+              ))}
+            </div>
+          ) : null}
         </div>
         <div className="flex flex-col items-end gap-2">
           <StatusBadge status={client.status} />

@@ -1,6 +1,6 @@
 # Kredo
 
-Kredo es una aplicacion web mobile-first para administrar una cartera pequena de prestamos personales. La V1 cubre autenticacion, clientes, prestamos, pagos, calculo de intereses por ciclo, anulaciones auditables, recibos, estados de cuenta, historial general, configuracion y reportes CSV.
+Kredo es una aplicacion web mobile-first para administrar una cartera pequena de prestamos personales. La V1 cubre autenticacion, clientes, etiquetas, prestamos, pagos, calculo de intereses por ciclo, anulaciones auditables, recibos, estados de cuenta, historial general, configuracion y reportes CSV.
 
 ## Requisitos
 
@@ -38,6 +38,7 @@ Antes de una entrega, revisa en un telefono o viewport movil este recorrido:
 7. Abrir el estado de cuenta y el historial general.
 8. Guardar la configuracion, recargar la pagina y crear un prestamo con la tasa predeterminada.
 9. Exportar cartera y movimientos; abrir ambos CSV en Excel.
+10. Crear varias etiquetas, asignarlas a clientes, filtrar la cartera y compartir la vista como imagen desde un telefono.
 
 ## Operacion y datos
 
@@ -57,4 +58,4 @@ El proyecto incluye `vercel.json` para resolver las rutas de React. En Vercel co
 
 ## Alcance conocido
 
-Kredo es de un solo administrador por cuenta y utiliza USD. No incluye contabilidad completa, saldo a favor por sobrepago, WhatsApp, firma digital, buro de credito, multiples sucursales ni importacion automatica desde Excel. El archivo historico original debe reconciliarse manualmente antes de retirar el control paralelo.
+Kredo es de un solo administrador por cuenta y utiliza USD. Puede abrir el menu nativo del telefono para compartir imagenes por WhatsApp, pero no envia mensajes automaticamente ni se conecta a WhatsApp Business. No incluye contabilidad completa, saldo a favor por sobrepago, firma digital, buro de credito, multiples sucursales ni importacion automatica desde Excel. El archivo historico original debe reconciliarse manualmente antes de retirar el control paralelo.

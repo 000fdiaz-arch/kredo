@@ -1,6 +1,7 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, KeyboardEvent, useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
+import { Plus, Tag, X } from "lucide-react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Field } from "@/components/ui/Field";
 import { useAuth } from "@/features/auth/AuthProvider";
@@ -12,6 +13,7 @@ import {
   type CreateClientInput,
   type UpdateClientInput,
 } from "@/services/clients.service";
+import { createTag, listTags, replaceClientTags } from "@/services/tags.service";
 
 export function ClientFormPage() {
   const navigate = useNavigate();
@@ -27,7 +29,15 @@ export function ClientFormPage() {
   const [referenceName, setReferenceName] = useState("");
   const [referencePhone, setReferencePhone] = useState("");
   const [notes, setNotes] = useState("");
+  const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
+  const [newTagNames, setNewTagNames] = useState<string[]>([]);
+  const [tagInput, setTagInput] = useState("");
   const [formError, setFormError] = useState("");
+
+  const { data: availableTags = [] } = useQuery({
+    queryKey: ["tags"],
+    queryFn: listTags,
+  });
 
   const {
     data: existingClient,
@@ -51,14 +61,33 @@ export function ClientFormPage() {
     setReferenceName(existingClient.reference_name ?? "");
     setReferencePhone(existingClient.reference_phone ?? "");
     setNotes(existingClient.notes ?? "");
+    setSelectedTagIds(existingClient.tags.map((tag) => tag.id));
   }, [existingClient]);
 
   const mutation = useMutation({
-    mutationFn: (input: CreateClientInput | UpdateClientInput) => ("clientId" in input ? updateClient(input) : createClient(input)),
+    mutationFn: async (input: CreateClientInput | UpdateClientInput) => {
+      const createdTags = await Promise.all(
+        newTagNames.map((name) => createTag({
+          organizationId: input.organizationId,
+          userId: input.userId,
+          name,
+        })),
+      );
+      const client = "clientId" in input ? await updateClient(input) : await createClient(input);
+
+      await replaceClientTags({
+        clientId: client.id,
+        organizationId: input.organizationId,
+        tagIds: [...selectedTagIds, ...createdTags.map((tag) => tag.id)],
+      });
+
+      return client;
+    },
     onSuccess: async (client) => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["clients"] }),
         queryClient.invalidateQueries({ queryKey: ["client", client.id] }),
+        queryClient.invalidateQueries({ queryKey: ["tags"] }),
         queryClient.invalidateQueries({ queryKey: ["dashboard-summary"] }),
       ]);
       navigate(`/clients/${client.id}`);
@@ -67,6 +96,32 @@ export function ClientFormPage() {
       setFormError(isEditing ? "No se pudo actualizar el cliente. Revisa la conexion e intenta otra vez." : "No se pudo crear el cliente. Revisa la conexion y que la migracion este aplicada.");
     },
   });
+
+  function addNewTag() {
+    const name = tagInput.trim().replace(/\s+/g, " ");
+    if (!name) return;
+
+    if (name.length > 40) {
+      setFormError("Las etiquetas pueden tener hasta 40 caracteres.");
+      return;
+    }
+
+    const existing = availableTags.find((tag) => tag.name.toLocaleLowerCase() === name.toLocaleLowerCase());
+    if (existing) {
+      setSelectedTagIds((current) => current.includes(existing.id) ? current : [...current, existing.id]);
+    } else if (!newTagNames.some((tagName) => tagName.toLocaleLowerCase() === name.toLocaleLowerCase())) {
+      setNewTagNames((current) => [...current, name]);
+    }
+
+    setTagInput("");
+    setFormError("");
+  }
+
+  function handleTagKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key !== "Enter" && event.key !== ",") return;
+    event.preventDefault();
+    addNewTag();
+  }
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -176,6 +231,77 @@ export function ClientFormPage() {
             placeholder="Opcional"
           />
         </label>
+
+        <fieldset>
+          <legend className="flex items-center gap-2 text-sm font-medium text-kredo-ink">
+            <Tag className="h-4 w-4" aria-hidden="true" />
+            Etiquetas
+          </legend>
+          <p className="mt-1 text-xs text-kredo-muted">Un cliente puede pertenecer a varias etiquetas.</p>
+
+          {availableTags.length > 0 ? (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {availableTags.map((tag) => {
+                const selected = selectedTagIds.includes(tag.id);
+                return (
+                  <button
+                    aria-pressed={selected}
+                    className={`min-h-10 rounded-full border px-3 text-sm font-semibold ${
+                      selected
+                        ? "border-kredo-primary bg-blue-50 text-kredo-primary"
+                        : "border-kredo-line bg-white text-kredo-muted"
+                    }`}
+                    key={tag.id}
+                    onClick={() => setSelectedTagIds((current) => (
+                      selected ? current.filter((tagId) => tagId !== tag.id) : [...current, tag.id]
+                    ))}
+                    type="button"
+                  >
+                    {tag.name}
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
+
+          {newTagNames.length > 0 ? (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {newTagNames.map((name) => (
+                <span className="inline-flex min-h-10 items-center gap-1 rounded-full border border-kredo-green bg-green-50 px-3 text-sm font-semibold text-kredo-green" key={name}>
+                  {name}
+                  <button
+                    aria-label={`Quitar etiqueta ${name}`}
+                    className="rounded-full p-1"
+                    onClick={() => setNewTagNames((current) => current.filter((tagName) => tagName !== name))}
+                    type="button"
+                  >
+                    <X className="h-3.5 w-3.5" aria-hidden="true" />
+                  </button>
+                </span>
+              ))}
+            </div>
+          ) : null}
+
+          <div className="mt-3 flex gap-2">
+            <input
+              className="min-h-12 min-w-0 flex-1 rounded-md border border-kredo-line bg-white px-3 text-base outline-none focus:border-kredo-primary"
+              maxLength={40}
+              onChange={(event) => setTagInput(event.target.value)}
+              onKeyDown={handleTagKeyDown}
+              placeholder="Nueva etiqueta"
+              value={tagInput}
+            />
+            <button
+              aria-label="Agregar etiqueta"
+              className="inline-flex min-h-12 items-center justify-center rounded-md border border-kredo-line bg-white px-4 font-semibold text-kredo-primary disabled:opacity-50"
+              disabled={!tagInput.trim()}
+              onClick={addNewTag}
+              type="button"
+            >
+              <Plus className="h-5 w-5" aria-hidden="true" />
+            </button>
+          </div>
+        </fieldset>
 
         {formError ? (
           <p className="rounded-md bg-red-50 px-3 py-2 text-sm font-medium text-kredo-red">{formError}</p>

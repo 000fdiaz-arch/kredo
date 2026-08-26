@@ -154,6 +154,29 @@ create index clients_identification_idx on clients (identification);
 create index clients_phone_idx on clients (phone);
 ```
 
+### tags y client_tags
+
+Las etiquetas pertenecen a una organizacion y pueden reutilizarse en varios clientes. La tabla puente permite que cada cliente tenga varias etiquetas.
+
+```sql
+create table tags (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references organizations(id) on delete cascade,
+  created_by uuid not null references auth.users(id) on delete restrict,
+  name text not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table client_tags (
+  organization_id uuid not null references organizations(id) on delete cascade,
+  client_id uuid not null,
+  tag_id uuid not null,
+  created_at timestamptz not null default now(),
+  primary key (client_id, tag_id)
+);
+```
+
 ### cycles
 
 ```sql

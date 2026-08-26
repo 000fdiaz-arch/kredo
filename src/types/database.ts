@@ -92,6 +92,45 @@ export type Database = {
         };
         Relationships: [];
       };
+      tags: {
+        Row: {
+          id: string;
+          organization_id: string;
+          created_by: string;
+          name: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          organization_id: string;
+          created_by: string;
+          name: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          name?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      client_tags: {
+        Row: {
+          organization_id: string;
+          client_id: string;
+          tag_id: string;
+          created_at: string;
+        };
+        Insert: {
+          organization_id: string;
+          client_id: string;
+          tag_id: string;
+          created_at?: string;
+        };
+        Update: Record<string, never>;
+        Relationships: [];
+      };
       cycles: {
         Row: {
           id: string;

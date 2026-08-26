@@ -8,12 +8,14 @@ import {
 } from "@/services/interest-policy.service";
 import type { Database } from "@/types/database";
 import type { ClientStatus } from "@/types/domain";
+import type { TagRow } from "@/services/tags.service";
 
 export type ClientRow = Database["public"]["Tables"]["clients"]["Row"];
 export type ClientBalanceRow = Database["public"]["Views"]["client_balances"]["Row"];
 
 export type ClientWithBalance = ClientRow & {
   balance: ClientBalanceRow | null;
+  tags: TagRow[];
 };
 
 export type CreateClientInput = {
@@ -358,9 +360,16 @@ export async function updateClient(input: UpdateClientInput): Promise<ClientRow>
 }
 
 export async function listClientsWithBalances(): Promise<ClientWithBalance[]> {
-  const [{ data: clients, error: clientsError }, { data: balances, error: balancesError }] = await Promise.all([
+  const [
+    { data: clients, error: clientsError },
+    { data: balances, error: balancesError },
+    { data: tags, error: tagsError },
+    { data: clientTags, error: clientTagsError },
+  ] = await Promise.all([
     supabase.from("clients").select("*").order("full_name", { ascending: true }),
     supabase.from("client_balances").select("*"),
+    supabase.from("tags").select("*"),
+    supabase.from("client_tags").select("client_id, tag_id"),
   ]);
 
   if (clientsError) {
@@ -371,18 +380,37 @@ export async function listClientsWithBalances(): Promise<ClientWithBalance[]> {
     throw balancesError;
   }
 
+  if (tagsError) throw tagsError;
+  if (clientTagsError) throw clientTagsError;
+
   const balancesByClient = new Map((balances ?? []).map((balance) => [balance.client_id, balance]));
+  const tagsById = new Map((tags ?? []).map((tag) => [tag.id, tag]));
+  const tagsByClient = new Map<string, TagRow[]>();
+
+  for (const assignment of clientTags ?? []) {
+    const tag = tagsById.get(assignment.tag_id);
+    if (!tag) continue;
+    const assignedTags = tagsByClient.get(assignment.client_id) ?? [];
+    assignedTags.push(tag);
+    tagsByClient.set(assignment.client_id, assignedTags);
+  }
 
   return applyDisplayStatuses((clients ?? []).map((client) => ({
     ...client,
     balance: balancesByClient.get(client.id) ?? null,
+    tags: (tagsByClient.get(client.id) ?? []).sort((first, second) => first.name.localeCompare(second.name)),
   })));
 }
 
 export async function getClientWithBalance(clientId: string): Promise<ClientWithBalance | null> {
-  const [{ data: client, error: clientError }, { data: balance, error: balanceError }] = await Promise.all([
+  const [
+    { data: client, error: clientError },
+    { data: balance, error: balanceError },
+    { data: assignments, error: assignmentsError },
+  ] = await Promise.all([
     supabase.from("clients").select("*").eq("id", clientId).maybeSingle(),
     supabase.from("client_balances").select("*").eq("client_id", clientId).maybeSingle(),
+    supabase.from("client_tags").select("tag_id").eq("client_id", clientId),
   ]);
 
   if (clientError) {
@@ -393,13 +421,24 @@ export async function getClientWithBalance(clientId: string): Promise<ClientWith
     throw balanceError;
   }
 
+  if (assignmentsError) throw assignmentsError;
+
   if (!client) {
     return null;
+  }
+
+  const tagIds = (assignments ?? []).map((assignment) => assignment.tag_id);
+  let tags: TagRow[] = [];
+  if (tagIds.length > 0) {
+    const { data: tagRows, error: tagsError } = await supabase.from("tags").select("*").in("id", tagIds);
+    if (tagsError) throw tagsError;
+    tags = (tagRows ?? []).sort((first, second) => first.name.localeCompare(second.name));
   }
 
   const [clientWithStatus] = await applyDisplayStatuses([{
     ...client,
     balance,
+    tags,
   }]);
 
   return clientWithStatus;
