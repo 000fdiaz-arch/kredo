@@ -5,6 +5,7 @@ dist
 .DS_Store
 *.tsbuildinfo
 .codex-*.log
+.kredo-audit-dump.sql
 
 .vercel
 supabase/.temp/

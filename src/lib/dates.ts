@@ -24,6 +24,20 @@ export function getCycleRange(dateValue: string) {
   };
 }
 
+// Cash reporting covers every calendar day; operational interest closes stay unchanged.
+export function getCycleReportingRange(dateValue: string) {
+  const range = getCycleRange(dateValue);
+  const [year, month, day] = dateValue.split("-").map(Number);
+
+  if (day <= 15) return range;
+
+  const lastDay = new Date(year, month, 0).getDate();
+  return {
+    ...range,
+    endDate: `${year}-${String(month).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`,
+  };
+}
+
 export function getNextCycleRange(dateValue: string) {
   const current = getCycleRange(dateValue);
   const [year, month, day] = current.endDate.split("-").map(Number);

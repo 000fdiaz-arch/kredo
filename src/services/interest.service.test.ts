@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calculateCycleInterest, calculateGeneratedInterestCollection, calculateProjectedClientInterest, getUpcomingProjectionEndDates, listPaymentInterestCycleRanges } from "@/services/interest.service";
+import { calculateCycleInterest, calculateGeneratedInterestCollection, calculateProjectedClientInterest, getUpcomingProjectionEndDates, listPaymentInterestCycleRanges, type InterestAdjustment } from "@/services/interest.service";
 import type { Database } from "@/types/database";
 
 type LoanRow = Database["public"]["Tables"]["loans"]["Row"];
@@ -48,6 +48,44 @@ function payment(input: Partial<PaymentRow>): PaymentRow {
 }
 
 describe("calculateCycleInterest", () => {
+  const capitalCorrection: InterestAdjustment = {
+    adjustment_date: "2026-08-20", adjustment_type: "principal_decrease", principal_amount_cents: 660, voided_at: null,
+  };
+
+  it("charges 5% on the corrected capital of 177.40, not the old 184.00", () => {
+    const loans = [
+      loan({ id: "first", principal_amount_cents: 10000 }),
+      loan({ id: "second", loan_date: "2026-07-20", principal_amount_cents: 10000 }),
+    ];
+    const payments = [payment({ principal_amount_cents: 1600 })];
+    const rates = loans.map((item) => ({ loan_id: item.id, effective_date: "2026-08-30", interest_rate_bps: 500, created_at: "2026-08-20T12:00:00Z" }));
+    expect(calculateCycleInterest(loans, payments, "2026-08-30", rates, [capitalCorrection])).toEqual({
+      principalBaseCents: 17740, interestAmountCents: 887, weightedRateBps: 500,
+    });
+    expect(calculateCycleInterest(loans, payments, "2026-08-15", rates, [capitalCorrection]).interestAmountCents).toBe(1840);
+    expect(calculateProjectedClientInterest(loans, payments, "2026-09-15", [], rates, [capitalCorrection]).interestAmountCents).toBe(887);
+  });
+
+  it("ignores voided corrections and never capitalizes interest adjustments", () => {
+    const adjustments: InterestAdjustment[] = [
+      { ...capitalCorrection, voided_at: "2026-08-21" },
+      { ...capitalCorrection, adjustment_type: "interest_decrease", principal_amount_cents: 9999 },
+      { ...capitalCorrection, adjustment_type: "interest_increase", principal_amount_cents: 9999 },
+    ];
+    expect(calculateCycleInterest([loan({})], [], "2026-08-30", [], adjustments).principalBaseCents).toBe(20000);
+  });
+
+  it("allocates capital corrections FIFO and clamps fully repaid capital at zero", () => {
+    const loans = [loan({ id: "a", principal_amount_cents: 1000 }), loan({ id: "b", principal_amount_cents: 1000, interest_rate_bps: 500 })];
+    expect(calculateCycleInterest(loans, [], "2026-08-30", [], [{ ...capitalCorrection, principal_amount_cents: 1500 }])).toEqual({
+      principalBaseCents: 500, interestAmountCents: 25, weightedRateBps: 500,
+    });
+    expect(calculateCycleInterest(loans, [], "2026-08-30", [], [{ ...capitalCorrection, principal_amount_cents: 2500 }]).interestAmountCents).toBe(0);
+    expect(calculateCycleInterest([loan({ principal_amount_cents: 1000 })], [], "2026-08-30", [], [
+      { ...capitalCorrection, adjustment_type: "principal_increase", principal_amount_cents: 500 },
+    ]).principalBaseCents).toBe(1500);
+  });
+
   it("calculates interest from outstanding principal at cycle close", () => {
     const interest = calculateCycleInterest(
       [loan({ principal_amount_cents: 20_000, interest_rate_bps: 1_000 })],

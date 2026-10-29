@@ -1,7 +1,8 @@
-import { Link } from "react-router-dom";
-import { useParams } from "react-router-dom";
+import { ChevronRight, MessageCircle, Phone, X } from "lucide-react";
+import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import html2canvas from "html2canvas";
+import { useRef, useState } from "react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { MetricCard } from "@/components/ui/MetricCard";
 import { StatusBadge } from "@/components/ui/StatusBadge";
@@ -11,7 +12,7 @@ import { listClientMovements, type ClientMovementRow } from "@/services/movement
 import { voidLoan } from "@/services/loans.service";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { useOrganization } from "@/features/organizations/OrganizationProvider";
-import { generatePaymentInterestForClient, getClientInterestStatus } from "@/services/interest.service";
+import { generateDueInterestForClient, getClientInterestStatus } from "@/services/interest.service";
 import { getNextCycleRange, toDateInputValue } from "@/lib/dates";
 import {
   changeClientInterestRate,
@@ -19,6 +20,9 @@ import {
   getClientInterestPolicyStatus,
   resumeClientInterest,
 } from "@/services/interest-policy.service";
+import { getClientStatement } from "@/services/statements.service";
+import { ClientStatementCard } from "@/features/statements/ClientStatementCard";
+import { toWhatsAppPhone } from "@/lib/phone";
 
 const movementLabels: Record<ClientMovementRow["movement_type"], string> = {
   loan: "Prestamo",
@@ -29,12 +33,29 @@ const movementLabels: Record<ClientMovementRow["movement_type"], string> = {
 };
 
 type InterestPolicyAction = "rate" | "freeze" | "resume";
+type ClientProfileTab = "summary" | "interest" | "history";
+
+function downloadBlob(blob: Blob, fileName: string) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
 
 export function ClientProfilePage() {
   const { clientId = "" } = useParams();
   const { user } = useAuth();
   const { organizationId } = useOrganization();
   const queryClient = useQueryClient();
+  const statementRef = useRef<HTMLElement | null>(null);
+  const [activeTab, setActiveTab] = useState<ClientProfileTab>("summary");
+  const [contactActionsOpen, setContactActionsOpen] = useState(false);
+  const [isPreparingWhatsApp, setIsPreparingWhatsApp] = useState(false);
+  const [whatsAppMessage, setWhatsAppMessage] = useState("");
   const [movementToVoid, setMovementToVoid] = useState<ClientMovementRow | null>(null);
   const [voidReason, setVoidReason] = useState("");
   const [voidError, setVoidError] = useState("");
@@ -80,6 +101,16 @@ export function ClientProfilePage() {
     enabled: Boolean(clientId),
   });
 
+  const {
+    data: statementData,
+    isLoading: statementLoading,
+    error: statementError,
+  } = useQuery({
+    queryKey: ["client-statement", clientId],
+    queryFn: () => getClientStatement(clientId),
+    enabled: Boolean(clientId && contactActionsOpen),
+  });
+
   const voidMutation = useMutation({
     mutationFn: voidLoan,
     onSuccess: async () => {
@@ -99,7 +130,7 @@ export function ClientProfilePage() {
   });
 
   const generateInterestMutation = useMutation({
-    mutationFn: () => generatePaymentInterestForClient(clientId, toDateInputValue()),
+    mutationFn: () => generateDueInterestForClient(clientId, toDateInputValue()),
     onSuccess: async (created) => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["client", clientId] }),
@@ -111,7 +142,7 @@ export function ClientProfilePage() {
       setInterestMessage(
         created.length > 0
           ? `${created.length === 1 ? "Cargo generado" : "Cargos generados"} correctamente.`
-          : "Los cargos de este ciclo ya estaban generados o no hay capital sujeto a interes.",
+          : "No hay intereses vencidos pendientes de generar.",
       );
     },
   });
@@ -218,6 +249,65 @@ export function ClientProfilePage() {
     });
   }
 
+  function openContactActions() {
+    if (!client?.phone) return;
+    setWhatsAppMessage("");
+    setContactActionsOpen(true);
+  }
+
+  async function handleWhatsAppStatement() {
+    if (!client?.phone) {
+      setWhatsAppMessage("Este cliente no tiene un telefono registrado.");
+      return;
+    }
+
+    const whatsAppPhone = toWhatsAppPhone(client.phone);
+    if (whatsAppPhone.length < 10) {
+      setWhatsAppMessage("El telefono registrado no incluye un numero valido para WhatsApp.");
+      return;
+    }
+
+    if (!statementData || !statementRef.current) {
+      setWhatsAppMessage("El estado de cuenta todavia se esta preparando. Intenta nuevamente en un momento.");
+      return;
+    }
+
+    setWhatsAppMessage("");
+    setIsPreparingWhatsApp(true);
+    const whatsAppWindow = window.open("about:blank", "_blank");
+
+    try {
+      const canvas = await html2canvas(statementRef.current, {
+        backgroundColor: "#ffffff",
+        scale: 2,
+        useCORS: true,
+      });
+      const blob = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob((result) => {
+          if (result) resolve(result);
+          else reject(new Error("Image could not be created"));
+        }, "image/png");
+      });
+      const fileName = `estado-${client.full_name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || "cliente"}.png`;
+      downloadBlob(blob, fileName);
+
+      const text = encodeURIComponent(`Hola ${client.full_name}, te comparto tu estado de cuenta actualizado.`);
+      const whatsAppUrl = `https://wa.me/${whatsAppPhone}?text=${text}`;
+      if (whatsAppWindow) {
+        whatsAppWindow.location.replace(whatsAppUrl);
+      } else {
+        window.location.assign(whatsAppUrl);
+      }
+
+      setWhatsAppMessage("La imagen se descargo y se abrio el chat correcto. Adjuntala y confirma el envio en WhatsApp.");
+    } catch {
+      whatsAppWindow?.close();
+      setWhatsAppMessage("No se pudo preparar la imagen. Abre el estado de cuenta e intenta compartirlo desde alli.");
+    } finally {
+      setIsPreparingWhatsApp(false);
+    }
+  }
+
   if (isLoading) {
     return <article className="rounded-lg border border-kredo-line bg-white p-4 text-sm text-kredo-muted">Cargando perfil...</article>;
   }
@@ -234,10 +324,24 @@ export function ClientProfilePage() {
     <section>
       <PageHeader eyebrow="Perfil" title={client.full_name} description="Informacion, saldo e historial del cliente." />
 
-      <div className="mb-4 flex items-center justify-between rounded-lg border border-kredo-line bg-white p-4">
-        <div>
-          <p className="text-sm text-kredo-muted">Telefono</p>
-          <p className="font-semibold">{client.phone ?? "Pendiente"}</p>
+      <div className="mb-4 flex items-start justify-between gap-3 rounded-lg border border-kredo-line bg-white p-4">
+        <div className="min-w-0 flex-1">
+          <button
+            className="flex min-h-11 w-full items-center justify-between gap-3 text-left disabled:cursor-not-allowed"
+            disabled={!client.phone}
+            onClick={openContactActions}
+            type="button"
+          >
+            <span>
+              <span className="block text-sm text-kredo-muted">Telefono</span>
+              <span className="mt-0.5 block font-semibold">{client.phone ?? "Pendiente"}</span>
+            </span>
+            {client.phone ? (
+              <span className="inline-flex items-center gap-1 text-sm font-semibold text-kredo-primary">
+                Acciones <ChevronRight className="h-4 w-4" aria-hidden="true" />
+              </span>
+            ) : null}
+          </button>
           {client.tags.length > 0 ? (
             <div className="mt-3 flex flex-wrap gap-1.5">
               {client.tags.map((tag) => (
@@ -258,11 +362,67 @@ export function ClientProfilePage() {
 
       <div className="mb-4 grid grid-cols-2 gap-3">
         <MetricCard label="Capital" value={formatMoney(client.balance?.principal_balance_cents ?? 0)} />
-        <MetricCard label="Interes" value={formatMoney(client.balance?.interest_balance_cents ?? 0)} />
+        <MetricCard label="Interés pendiente" value={formatMoney(client.balance?.interest_balance_cents ?? 0)} helper="Lo que falta por cobrar, no todo lo generado." />
         <MetricCard label="Total" value={formatMoney(client.balance?.total_balance_cents ?? 0)} />
         <MetricCard label="Proximo cierre" value={interestStatus?.nextCloseDate ?? "Cargando"} />
       </div>
 
+      <div className="mb-4 grid grid-cols-2 gap-2">
+        <Link className="min-h-12 rounded-md bg-kredo-primary px-3 py-3 text-center font-semibold text-white" to={`/loans/new?clientId=${client.id}`}>
+          Nuevo prestamo
+        </Link>
+        <Link className="min-h-12 rounded-md border border-kredo-line bg-white px-3 py-3 text-center font-semibold" to={`/payments/new?clientId=${client.id}`}>
+          Registrar pago
+        </Link>
+      </div>
+
+      <div className="sticky top-0 z-20 -mx-4 mb-4 border-y border-kredo-line bg-kredo-surface/95 px-4 py-2 backdrop-blur">
+        <div className="grid grid-cols-3 gap-1 rounded-lg bg-gray-100 p-1" role="tablist" aria-label="Informacion del cliente">
+          <button
+            aria-selected={activeTab === "summary"}
+            className={`min-h-11 rounded-md px-2 text-sm font-semibold ${activeTab === "summary" ? "bg-white text-kredo-ink shadow-sm" : "text-kredo-muted"}`}
+            onClick={() => setActiveTab("summary")}
+            role="tab"
+            type="button"
+          >
+            Resumen
+          </button>
+          <button
+            aria-selected={activeTab === "interest"}
+            className={`relative min-h-11 rounded-md px-2 text-sm font-semibold ${activeTab === "interest" ? "bg-white text-kredo-ink shadow-sm" : "text-kredo-muted"}`}
+            onClick={() => setActiveTab("interest")}
+            role="tab"
+            type="button"
+          >
+            Intereses
+            {(interestStatus?.dueCycles.filter((cycle) => !cycle.alreadyGenerated).length ?? 0) > 0 ? (
+              <span className="ml-1 inline-flex min-w-5 items-center justify-center rounded-full bg-kredo-red px-1.5 py-0.5 text-[11px] leading-none text-white">
+                {interestStatus?.dueCycles.filter((cycle) => !cycle.alreadyGenerated).length}
+              </span>
+            ) : null}
+          </button>
+          <button
+            aria-selected={activeTab === "history"}
+            className={`min-h-11 rounded-md px-2 text-sm font-semibold ${activeTab === "history" ? "bg-white text-kredo-ink shadow-sm" : "text-kredo-muted"}`}
+            onClick={() => setActiveTab("history")}
+            role="tab"
+            type="button"
+          >
+            Historial
+          </button>
+        </div>
+      </div>
+
+      {activeTab === "summary" ? (
+        <div role="tabpanel">
+          <Link className="inline-flex min-h-12 w-full items-center justify-center rounded-md border border-kredo-line bg-white px-4 py-3 text-center font-semibold" to={`/clients/${client.id}/statement`}>
+            Estado de cuenta
+          </Link>
+        </div>
+      ) : null}
+
+      {activeTab === "interest" ? (
+        <div role="tabpanel">
       <div className="mb-4 rounded-lg border border-kredo-line bg-white p-4">
         <div className="flex items-start justify-between gap-3">
           <div>
@@ -363,9 +523,12 @@ export function ClientProfilePage() {
         <div className="flex items-start justify-between gap-3">
           <div>
             <h2 className="font-semibold text-kredo-ink">Intereses por ciclo</h2>
-            <p className="mt-1 text-sm text-kredo-muted">Cierres configurados los dias 15 y 30.</p>
+            <p className="mt-1 text-sm text-kredo-muted">Cierres los días 15 y 30 (último día en febrero). Solo se generan ciclos vencidos; no se adelanta el próximo cierre.</p>
           </div>
-          <p className="text-right text-lg font-bold">{formatMoney(interestStatus?.dueInterestCents ?? 0)}</p>
+          <div className="shrink-0 text-right">
+            <p className="text-xs text-kredo-muted">Por generar</p>
+            <p className="text-lg font-bold">{formatMoney(interestStatus?.dueInterestCents ?? 0)}</p>
+          </div>
         </div>
 
         {interestStatusLoading ? <p className="mt-3 text-sm text-kredo-muted">Revisando ciclos vencidos...</p> : null}
@@ -382,18 +545,33 @@ export function ClientProfilePage() {
               <div className="rounded-md bg-kredo-surface p-3 text-sm" key={cycle.endDate}>
                 <div className="flex justify-between gap-3">
                   <span className="text-kredo-muted">Cierre {cycle.endDate}</span>
-                  <span className="font-semibold">{formatMoney(cycle.interestAmountCents)}</span>
+                  <span className="font-semibold">{cycle.alreadyGenerated ? "Generado" : "Por generar"}: {formatMoney(cycle.interestAmountCents)}</span>
                 </div>
                 <div className="mt-1 flex justify-between gap-3 text-xs">
                   <span className="text-kredo-muted">Base {formatMoney(cycle.principalBaseCents)}</span>
                   <span className={cycle.alreadyGenerated ? "font-semibold text-kredo-green" : "font-semibold text-kredo-yellow"}>
-                    {cycle.alreadyGenerated ? "Generado" : "Pendiente"}
+                    {cycle.alreadyGenerated ? (cycle.pendingInterestCents > 0 ? "Por cobrar" : "Saldado") : "Sin generar"}
                   </span>
                 </div>
+                {cycle.generatedAt ? (
+                  <p className="mt-2 text-xs text-kredo-muted">Registrado el {toDateInputValue(new Date(cycle.generatedAt))}{toDateInputValue(new Date(cycle.generatedAt)) < cycle.endDate ? " (antes del cierre)" : ""}.</p>
+                ) : null}
+                {cycle.alreadyGenerated ? (
+                  <dl className="mt-3 space-y-1 border-t border-kredo-line pt-2 text-xs">
+                    <div className="flex justify-between gap-3"><dt>Cobrado</dt><dd>{formatMoney(cycle.collectedInterestCents)}</dd></div>
+                    <div className="flex justify-between gap-3"><dt>Reducido por ajustes</dt><dd>{formatMoney(cycle.adjustedInterestCents)}</dd></div>
+                    <div className="flex justify-between gap-3 font-semibold"><dt>Pendiente por cobrar</dt><dd>{formatMoney(cycle.pendingInterestCents)}</dd></div>
+                  </dl>
+                ) : null}
+                {cycle.needsReview ? (
+                  <p className="mt-2 rounded-md bg-amber-50 p-2 text-xs text-amber-900">Revisar: el cargo registrado difiere del cálculo con los movimientos y condiciones actuales. No se ha modificado automáticamente.</p>
+                ) : null}
               </div>
             ))}
           </div>
         ) : null}
+
+        <p className="mt-3 text-xs text-kredo-muted">Generado no significa pendiente: los pagos cubren primero los cargos más antiguos y los ajustes pueden reducir lo adeudado.</p>
 
         {generateInterestMutation.isPending ? <p className="mt-3 text-sm font-medium text-kredo-primary">Generando intereses vencidos...</p> : null}
 
@@ -410,7 +588,7 @@ export function ClientProfilePage() {
             ? "Generando cargos..."
             : interestPolicy?.isFrozen
               ? "Intereses congelados"
-              : "Generar cargos"}
+              : "Generar intereses vencidos"}
         </button>
 
         {interestMessage ? <p className="mt-2 text-sm font-medium text-kredo-green">{interestMessage}</p> : null}
@@ -421,20 +599,11 @@ export function ClientProfilePage() {
           </p>
         ) : null}
       </div>
+        </div>
+      ) : null}
 
-      <div className="mb-4 grid grid-cols-2 gap-2">
-        <Link className="min-h-12 rounded-md bg-kredo-primary px-3 py-3 text-center font-semibold text-white" to="/loans/new">
-          Nuevo prestamo
-        </Link>
-        <Link className="min-h-12 rounded-md border border-kredo-line bg-white px-3 py-3 text-center font-semibold" to={`/payments/new?clientId=${client.id}`}>
-          Registrar pago
-        </Link>
-        <Link className="col-span-2 min-h-12 rounded-md border border-kredo-line bg-white px-3 py-3 text-center font-semibold" to={`/clients/${client.id}/statement`}>
-          Estado de cuenta
-        </Link>
-      </div>
-
-      <div>
+      {activeTab === "history" ? (
+      <div role="tabpanel">
         <h2 className="mb-3 text-lg font-bold">Historial</h2>
         {movementsLoading ? (
           <article className="rounded-lg border border-kredo-line bg-white p-4 text-sm text-kredo-muted">Cargando historial...</article>
@@ -504,6 +673,77 @@ export function ClientProfilePage() {
           </article>
         ) : null}
       </div>
+      ) : null}
+
+      {statementData ? (
+        <div aria-hidden="true" className="pointer-events-none fixed left-[-10000px] top-0 w-[720px]">
+          <ClientStatementCard data={statementData} ref={statementRef} />
+        </div>
+      ) : null}
+
+      {contactActionsOpen ? (
+        <div className="fixed inset-0 z-40 flex items-end bg-black/30 px-4 pb-4" onClick={() => setContactActionsOpen(false)}>
+          <section
+            aria-labelledby="contact-actions-title"
+            className="w-full rounded-lg border border-kredo-line bg-white p-4 shadow-soft"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-kredo-muted">Telefono registrado</p>
+                <h2 className="mt-1 text-lg font-bold" id="contact-actions-title">{client.phone}</h2>
+                <p className="mt-1 text-sm text-kredo-muted">{client.full_name}</p>
+              </div>
+              <button
+                aria-label="Cerrar acciones del telefono"
+                className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-kredo-line text-kredo-muted"
+                onClick={() => setContactActionsOpen(false)}
+                type="button"
+              >
+                <X className="h-5 w-5" aria-hidden="true" />
+              </button>
+            </div>
+
+            <a
+              className="mt-4 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-md border border-kredo-line bg-white px-4 py-3 font-semibold"
+              href={`tel:${client.phone}`}
+            >
+              <Phone className="h-5 w-5" aria-hidden="true" />
+              Llamar
+            </a>
+
+            <button
+              className="mt-2 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-md bg-kredo-green px-4 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={isPreparingWhatsApp || statementLoading || Boolean(statementError)}
+              onClick={handleWhatsAppStatement}
+              type="button"
+            >
+              <MessageCircle className="h-5 w-5" aria-hidden="true" />
+              {isPreparingWhatsApp ? "Preparando imagen..." : statementLoading ? "Cargando estado..." : "Enviar estado por WhatsApp"}
+            </button>
+            <p className="mt-2 text-xs text-kredo-muted">
+              Se descargara la imagen y se abrira el chat de este numero. Solo debes adjuntarla y confirmar el envio.
+            </p>
+
+            {statementError ? (
+              <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm font-medium text-kredo-red">
+                No se pudo preparar el estado de cuenta. Intenta nuevamente.
+              </p>
+            ) : null}
+            {whatsAppMessage ? (
+              <p className="mt-3 rounded-md bg-blue-50 px-3 py-2 text-sm font-medium text-kredo-primary">{whatsAppMessage}</p>
+            ) : null}
+
+            <Link
+              className="mt-3 inline-flex min-h-11 w-full items-center justify-center text-sm font-semibold text-kredo-primary"
+              onClick={() => setContactActionsOpen(false)}
+              to={`/clients/${client.id}/statement`}
+            >
+              Ver estado de cuenta
+            </Link>
+          </section>
+        </div>
+      ) : null}
 
       {policyAction ? (
         <div className="fixed inset-0 z-40 flex items-end bg-black/30 px-4 pb-4">

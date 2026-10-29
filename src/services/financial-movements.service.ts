@@ -1,4 +1,4 @@
-import { getCycleRange, toDateInputValue } from "@/lib/dates";
+import { getCycleReportingRange, toDateInputValue } from "@/lib/dates";
 import { supabase } from "@/lib/supabase";
 import { calculateFinancialSummary, type FinancialMovementInput, type FinancialMovementType } from "@/services/finance-ledger";
 
@@ -272,7 +272,7 @@ async function getInterestGeneratedCents() {
 }
 
 export async function getFinancialIndicators(activePortfolioCents: number): Promise<FinancialIndicators> {
-  const cycleRange = getCycleRange(toDateInputValue());
+  const cycleRange = getCycleReportingRange(toDateInputValue());
   const [movements, interestGeneratedCents] = await Promise.all([
     listFinancialMovements(),
     getInterestGeneratedCents(),
@@ -333,13 +333,13 @@ export async function listCycleProfitSummaries(): Promise<CycleProfitSummary[]> 
     for (const client of clients ?? []) clientNames.set(client.id, client.full_name);
   }
 
-  const currentRange = getCycleRange(toDateInputValue());
+  const currentRange = getCycleReportingRange(toDateInputValue());
   const ranges = new Map<string, { startDate: string; endDate: string }>([
     [currentRange.startDate, currentRange],
   ]);
 
   for (const movement of movements) {
-    const range = getCycleRange(movement.movement_date);
+    const range = getCycleReportingRange(movement.movement_date);
     ranges.set(range.startDate, range);
   }
 

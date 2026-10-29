@@ -19,12 +19,24 @@ export type InterestLoan = Pick<
   "id" | "loan_date" | "principal_amount_cents" | "interest_rate_bps" | "created_at" | "voided_at"
 >;
 export type InterestPayment = Pick<PaymentRow, "payment_date" | "principal_amount_cents" | "voided_at">;
+export type InterestAdjustment = {
+  adjustment_date: string;
+  adjustment_type: "principal_increase" | "principal_decrease" | "interest_increase" | "interest_decrease";
+  principal_amount_cents: number;
+  interest_amount_cents?: number;
+  voided_at: string | null;
+};
 
 export type InterestCyclePreview = {
   endDate: string;
   principalBaseCents: number;
   interestAmountCents: number;
   alreadyGenerated: boolean;
+  generatedAt: string | null;
+  collectedInterestCents: number;
+  adjustedInterestCents: number;
+  pendingInterestCents: number;
+  needsReview: boolean;
 };
 
 export type ClientInterestStatus = {
@@ -57,6 +69,7 @@ export function calculateCycleInterest(
   payments: InterestPayment[],
   endDate: string,
   rateChanges: InterestRateChange[] = [],
+  adjustments: InterestAdjustment[] = [],
 ) {
   const eligibleLoans = loans
     // A loan granted on closing day starts accruing in the following cycle.
@@ -65,6 +78,14 @@ export function calculateCycleInterest(
   let principalPaidCents = payments
     .filter((payment) => payment.payment_date <= endDate && !payment.voided_at)
     .reduce((total, payment) => total + payment.principal_amount_cents, 0);
+
+  // Apply dated capital corrections through the same FIFO allocation as repayments.
+  // An increase restores capital to the oldest tranche; interest adjustments never capitalize.
+  for (const adjustment of adjustments) {
+    if (adjustment.voided_at || adjustment.adjustment_date > endDate) continue;
+    if (adjustment.adjustment_type === "principal_decrease") principalPaidCents += adjustment.principal_amount_cents;
+    if (adjustment.adjustment_type === "principal_increase") principalPaidCents -= adjustment.principal_amount_cents;
+  }
 
   const outstandingLoans = eligibleLoans.map((loan) => {
     const principalAppliedCents = Math.min(loan.principal_amount_cents, principalPaidCents);
@@ -100,12 +121,13 @@ export function calculateProjectedClientInterest(
   endDate: string,
   freezeEvents: InterestFreezeEvent[] = [],
   rateChanges: InterestRateChange[] = [],
+  adjustments: InterestAdjustment[] = [],
 ) {
   if (isInterestFrozenAt(freezeEvents, endDate)) {
     return { principalBaseCents: 0, interestAmountCents: 0, weightedRateBps: 0 };
   }
 
-  return calculateCycleInterest(loans, payments, endDate, rateChanges);
+  return calculateCycleInterest(loans, payments, endDate, rateChanges, adjustments);
 }
 
 export function getUpcomingProjectionEndDates(asOfDate = toDateInputValue(), count = 3) {
@@ -152,6 +174,11 @@ export async function getProjectedInterestForUpcomingCycles(
     .from("cycles")
     .select("id, end_date")
     .lte("end_date", lastEndDate);
+  let adjustmentsQuery = (supabase as any)
+    .from("adjustments")
+    .select("client_id, adjustment_date, adjustment_type, principal_amount_cents, voided_at")
+    .is("voided_at", null)
+    .lte("adjustment_date", asOfDate);
 
   if (organizationId) {
     loansQuery = loansQuery.eq("organization_id", organizationId);
@@ -160,15 +187,17 @@ export async function getProjectedInterestForUpcomingCycles(
     rateQuery = rateQuery.eq("organization_id", organizationId);
     chargesQuery = chargesQuery.eq("organization_id", organizationId);
     cyclesQuery = cyclesQuery.eq("organization_id", organizationId);
+    adjustmentsQuery = adjustmentsQuery.eq("organization_id", organizationId);
   }
 
-  const [loansResult, paymentsResult, freezeResult, rateResult, chargesResult, cyclesResult] = await Promise.all([
+  const [loansResult, paymentsResult, freezeResult, rateResult, chargesResult, cyclesResult, adjustmentsResult] = await Promise.all([
     loansQuery,
     paymentsQuery,
     freezeQuery,
     rateQuery,
     chargesQuery,
     cyclesQuery,
+    adjustmentsQuery,
   ]);
 
   if (loansResult.error) throw loansResult.error;
@@ -177,6 +206,7 @@ export async function getProjectedInterestForUpcomingCycles(
   if (rateResult.error) throw rateResult.error;
   if (chargesResult.error) throw chargesResult.error;
   if (cyclesResult.error) throw cyclesResult.error;
+  if (adjustmentsResult.error) throw adjustmentsResult.error;
 
   type ProjectedLoan = InterestLoan & { client_id: string };
   type ProjectedPayment = InterestPayment & { client_id: string; interest_amount_cents: number };
@@ -185,6 +215,7 @@ export async function getProjectedInterestForUpcomingCycles(
   type ProjectedCharge = { client_id: string; cycle_id: string; interest_amount_cents: number };
   const loans = (loansResult.data ?? []) as ProjectedLoan[];
   const payments = (paymentsResult.data ?? []) as ProjectedPayment[];
+  const adjustments = (adjustmentsResult.data ?? []) as Array<InterestAdjustment & { client_id: string }>;
   const freezeEvents = (freezeResult.data ?? []) as ProjectedFreeze[];
   const rateChanges = (rateResult.data ?? []) as ProjectedRate[];
   const cycleEndDatesById = new Map(
@@ -232,6 +263,7 @@ export async function getProjectedInterestForUpcomingCycles(
           endDate,
           freezeEvents.filter((event) => event.client_id === clientId),
           rateChanges.filter((change) => change.client_id === clientId),
+          adjustments.filter((adjustment) => adjustment.client_id === clientId),
         );
 
         return {
@@ -301,6 +333,16 @@ async function listClientInterestCharges(clientId: string) {
   return data ?? [];
 }
 
+async function listClientPrincipalAdjustments(clientId: string): Promise<InterestAdjustment[]> {
+  const { data, error } = await (supabase as any)
+    .from("adjustments")
+    .select("adjustment_date, adjustment_type, principal_amount_cents, interest_amount_cents, voided_at")
+    .eq("client_id", clientId)
+    .is("voided_at", null);
+  if (error) throw error;
+  return data ?? [];
+}
+
 async function listClientIdsWithLoans(organizationId?: string) {
   let query = (supabase as any)
     .from("loans")
@@ -334,45 +376,66 @@ export function listPaymentInterestCycleRanges(startDateValue: string, paymentDa
 }
 
 export async function getClientInterestStatus(clientId: string, asOfDate = toDateInputValue()): Promise<ClientInterestStatus> {
-  const [loans, payments, charges, policyData] = await Promise.all([
+  const [loans, payments, charges, policyData, adjustments] = await Promise.all([
     listClientLoans(clientId),
     listClientPayments(clientId),
     listClientInterestCharges(clientId),
     listClientInterestPolicyData(clientId),
+    listClientPrincipalAdjustments(clientId),
   ]);
   const firstLoan = loans[0];
 
-  if (!firstLoan) {
-    return {
-      dueCycles: [],
-      dueInterestCents: 0,
-      nextCloseDate: getNextCloseDate(asOfDate),
-    };
+  const cycleIds = [...new Set(charges.map((charge) => charge.cycle_id))];
+  const recordedCycles: Array<{ id: string; end_date: string }> = [];
+  if (cycleIds.length > 0) {
+    const { data, error } = await supabase.from("cycles").select("id, end_date").in("id", cycleIds);
+    if (error) throw error;
+    recordedCycles.push(...(data ?? []));
   }
+  const cycleDates = new Map(recordedCycles.map((cycle) => [cycle.id, cycle.end_date]));
+  const generatedByEndDate = new Map<string, InterestChargeRow>();
+  for (const charge of charges) {
+    const endDate = cycleDates.get(charge.cycle_id);
+    if (endDate) generatedByEndDate.set(endDate, charge);
+  }
+  // Keep recorded history even when the original loans were paid off or voided.
+  const endDates = [...new Set([
+    ...(firstLoan ? listDueCycleRanges(firstLoan.loan_date, asOfDate).map((range) => range.endDate) : []),
+    ...generatedByEndDate.keys(),
+  ])].sort();
+  const paidInterest = payments.filter((payment) => payment.payment_date <= asOfDate && !payment.voided_at)
+    .reduce((total, payment) => total + payment.interest_amount_cents, 0);
+  const currentAdjustments = adjustments.filter((adjustment) => !adjustment.voided_at && adjustment.adjustment_date <= asOfDate);
+  const increasedInterest = currentAdjustments.filter((adjustment) => adjustment.adjustment_type === "interest_increase")
+    .reduce((total, adjustment) => total + (adjustment.interest_amount_cents ?? 0), 0);
+  const decreasedInterest = currentAdjustments.filter((adjustment) => adjustment.adjustment_type === "interest_decrease")
+    .reduce((total, adjustment) => total + (adjustment.interest_amount_cents ?? 0), 0);
+  let availablePayments = Math.max(paidInterest - increasedInterest, 0);
+  let availableAdjustments = Math.max(decreasedInterest - Math.max(increasedInterest - paidInterest, 0), 0);
 
-  const generatedCycleIds = new Set(charges.map((charge) => charge.cycle_id));
-  const cycleRanges = listDueCycleRanges(firstLoan.loan_date, asOfDate);
-
-  const cycles = await Promise.all(
-    cycleRanges.map(async (range) => ({
-      range,
-      cycle: await getOrCreateCycle(firstLoan.user_id, (firstLoan as any).organization_id, range.endDate),
-    })),
-  );
-
-  const dueCycles = cycles
-    .map(({ range, cycle }) => {
-      const interest = calculateCycleInterest(loans, payments, range.endDate, policyData.rateChanges);
-
-      return {
-        endDate: range.endDate,
-        principalBaseCents: interest.principalBaseCents,
-        interestAmountCents: interest.interestAmountCents,
-        alreadyGenerated: generatedCycleIds.has(cycle.id),
-        frozen: isInterestFrozenAt(policyData.freezeEvents, range.endDate),
-      };
-    })
-    .filter((cycle) => cycle.principalBaseCents > 0 && !cycle.frozen);
+  const dueCycles = endDates.map((endDate) => {
+    const interest = calculateCycleInterest(loans, payments, endDate, policyData.rateChanges, adjustments);
+    const generated = generatedByEndDate.get(endDate);
+    const generatedAmount = generated?.interest_amount_cents ?? 0;
+    const collectedInterestCents = Math.min(generatedAmount, availablePayments);
+    availablePayments -= collectedInterestCents;
+    const adjustedInterestCents = Math.min(generatedAmount - collectedInterestCents, availableAdjustments);
+    availableAdjustments -= adjustedInterestCents;
+    return {
+      endDate,
+      principalBaseCents: generated?.principal_base_cents ?? interest.principalBaseCents,
+      interestAmountCents: generated?.interest_amount_cents ?? interest.interestAmountCents,
+      alreadyGenerated: Boolean(generated),
+      generatedAt: generated?.generated_at ?? null,
+      collectedInterestCents,
+      adjustedInterestCents,
+      pendingInterestCents: Math.max(generatedAmount - collectedInterestCents - adjustedInterestCents, 0),
+      needsReview: Boolean(generated && endDate <= asOfDate && (
+        generated.principal_base_cents !== interest.principalBaseCents || generated.interest_amount_cents !== interest.interestAmountCents
+      )),
+      frozen: isInterestFrozenAt(policyData.freezeEvents, endDate),
+    };
+  }).filter((cycle) => cycle.alreadyGenerated || (cycle.interestAmountCents > 0 && !cycle.frozen));
 
   return {
     dueCycles,
@@ -388,10 +451,11 @@ async function generateInterestForClient(
   asOfDate: string,
   getCycleRanges: (startDateValue: string, asOfDateValue: string) => Array<{ startDate: string; endDate: string }>,
 ): Promise<InterestChargeRow[]> {
-  const [loans, payments, policyData] = await Promise.all([
+  const [loans, payments, policyData, adjustments] = await Promise.all([
     listClientLoans(clientId),
     listClientPayments(clientId),
     listClientInterestPolicyData(clientId),
+    listClientPrincipalAdjustments(clientId),
   ]);
   const firstLoan = loans[0];
 
@@ -424,7 +488,7 @@ async function generateInterestForClient(
       continue;
     }
 
-    const interest = calculateCycleInterest(loans, payments, range.endDate, policyData.rateChanges);
+    const interest = calculateCycleInterest(loans, payments, range.endDate, policyData.rateChanges, adjustments);
 
     if (interest.principalBaseCents <= 0 || interest.interestAmountCents <= 0) {
       continue;
@@ -445,6 +509,17 @@ async function generateInterestForClient(
       .single();
 
     if (error) {
+      // Another request may have generated the same cycle after our lookup.
+      if (error.code === "23505") {
+        const { data: concurrentCharge, error: concurrentError } = await (supabase as any)
+          .from("interest_charges")
+          .select("id")
+          .eq("client_id", clientId)
+          .eq("cycle_id", cycle.id)
+          .is("voided_at", null)
+          .maybeSingle();
+        if (!concurrentError && concurrentCharge) continue;
+      }
       throw error;
     }
 

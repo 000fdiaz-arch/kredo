@@ -1,4 +1,4 @@
-import { getCycleRange, toDateInputValue } from "@/lib/dates";
+import { getCycleReportingRange, toDateInputValue } from "@/lib/dates";
 import { supabase } from "@/lib/supabase";
 import type { PaymentRow } from "@/services/payments.service";
 
@@ -22,7 +22,7 @@ type PaymentWithClientRow = PaymentRow & {
 };
 
 export async function getCurrentCyclePaymentBreakdown(): Promise<CyclePaymentBreakdown> {
-  const cycleRange = getCycleRange(toDateInputValue());
+  const cycleRange = getCycleReportingRange(toDateInputValue());
   const { data, error } = await supabase
     .from("payments")
     .select("*, clients!payments_client_organization_fk(full_name)")

@@ -1,6 +1,6 @@
 import { supabase } from "@/lib/supabase";
 import { listDueCycleRanges, toDateInputValue } from "@/lib/dates";
-import { calculateCycleInterest, type InterestLoan, type InterestPayment } from "@/services/interest.service";
+import { calculateCycleInterest, type InterestAdjustment, type InterestLoan, type InterestPayment } from "@/services/interest.service";
 import {
   isInterestFrozenAt,
   type InterestFreezeEvent,
@@ -113,6 +113,7 @@ async function getLateInterestByClient(clientIds: string[]) {
     { data: loans, error: loansError },
     { data: freezeEvents, error: freezeEventsError },
     { data: rateChanges, error: rateChangesError },
+    { data: adjustments, error: adjustmentsError },
   ] = await Promise.all([
     supabase
       .from("interest_charges")
@@ -138,6 +139,11 @@ async function getLateInterestByClient(clientIds: string[]) {
       .from("loan_interest_rate_changes")
       .select("client_id, loan_id, effective_date, interest_rate_bps, reason, created_at")
       .in("client_id", clientIds),
+    (supabase as any)
+      .from("adjustments")
+      .select("client_id, adjustment_date, adjustment_type, principal_amount_cents, voided_at")
+      .in("client_id", clientIds)
+      .is("voided_at", null),
   ]);
 
   if (chargesError) {
@@ -154,6 +160,7 @@ async function getLateInterestByClient(clientIds: string[]) {
 
   if (freezeEventsError) throw freezeEventsError;
   if (rateChangesError) throw rateChangesError;
+  if (adjustmentsError) throw adjustmentsError;
 
   const interestCharges = (charges ?? []) as InterestChargeStatusRow[];
   const cycleIds = [...new Set(interestCharges.map((charge) => charge.cycle_id))];
@@ -252,6 +259,7 @@ async function getLateInterestByClient(clientIds: string[]) {
           clientPayments as InterestPayment[],
           range.endDate,
           clientRateChanges,
+          ((adjustments ?? []) as Array<InterestAdjustment & { client_id: string }>).filter((adjustment) => adjustment.client_id === clientId),
         );
 
         return total + interest.interestAmountCents;

@@ -206,6 +206,13 @@ Excepcion practica:
 - Si el mes tiene menos de 30 dias, el segundo cierre sera el ultimo dia real del mes.
 - En meses de 31 dias, el cierre operativo se mantiene el dia 30.
 
+Los reportes de pagos y ganancia por ciclo cubren todos los dias del calendario:
+
+- Primera quincena: del 1 al 15.
+- Segunda quincena: del 16 al ultimo dia real del mes, incluido el 31 cuando exista.
+- El rango mostrado debe coincidir con las fechas incluidas en los totales y el desglose.
+- Esto no cambia el cierre operativo ni las fechas de generacion de intereses.
+
 Ejemplos:
 
 - Febrero 2027: cierre el 28.
@@ -257,6 +264,14 @@ Regla propuesta para V1:
 - Calcular el interes sobre capital pendiente al cierre.
 - Usar la tasa asociada al prestamo o tramo de capital cuando existan varios prestamos con tasas distintas.
 - Si no se puede atribuir capital pendiente por tramo, usar la tasa predeterminada del cliente o la tasa por defecto de configuracion.
+
+Correcciones de capital y generacion manual:
+
+- El calculo, la vista previa y las proyecciones incluyen los ajustes de capital no anulados cuya fecha sea igual o anterior al cierre.
+- Las disminuciones de capital siguen la misma asignacion FIFO que los pagos. Los aumentos restauran capital en el tramo mas antiguo. Los ajustes de interes no se capitalizan.
+- El boton del perfil genera solamente ciclos ya vencidos, nunca el siguiente cierre. La preparacion de intereses para un pago anticipado es un flujo separado.
+- Un cargo marcado como generado muestra la base y el importe realmente registrados, no una nueva estimacion con condiciones posteriores.
+- Un cargo incorrecto se anula con motivo y se sustituye conservando el original. Solo puede existir un cargo vigente por cliente y ciclo.
 
 Ambiguedad importante:
 
