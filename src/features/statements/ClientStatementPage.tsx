@@ -1,11 +1,14 @@
 import { Link, useParams } from "react-router-dom";
-import { Download, Printer, Share2 } from "lucide-react";
+import { Download, MessageCircle, Printer } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import html2canvas from "html2canvas";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { getClientStatement } from "@/services/statements.service";
 import { ClientStatementCard } from "@/features/statements/ClientStatementCard";
+import { formatMoney } from "@/lib/money";
+import { toDateInputValue } from "@/lib/dates";
+import { toWhatsAppPhone } from "@/lib/phone";
 
 function getErrorDetail(error: unknown) {
   if (error instanceof DOMException) {
@@ -21,10 +24,6 @@ function getErrorDetail(error: unknown) {
   }
 
   return "El navegador no entrego un detalle tecnico.";
-}
-
-function isShareCancelled(error: unknown) {
-  return error instanceof DOMException && error.name === "AbortError";
 }
 
 function downloadBlob(blob: Blob, fileName: string) {
@@ -120,7 +119,8 @@ export function ClientStatementPage() {
     return <article className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm font-medium text-kredo-red">No se pudo cargar el estado de cuenta.</article>;
   }
 
-  const { client } = data;
+  const statementData = data;
+  const client = statementData.client!;
 
   async function handleDownloadImage() {
     setShareError("");
@@ -136,52 +136,33 @@ export function ClientStatementPage() {
     }
   }
 
-  async function handleShareImage() {
+  function handleWhatsAppStatement() {
     setShareError("");
-
-    try {
-      if (!window.isSecureContext) {
-        setShareError("No se puede compartir directo porque la pagina no esta en un contexto seguro HTTPS.");
-        return;
-      }
-
-      if (!("share" in navigator)) {
-        setShareError("Este navegador no tiene menu nativo de compartir. Usa el boton Imagen y enviala por WhatsApp.");
-        return;
-      }
-
-      const image = preparedImageRef.current;
-
-      if (!image) {
-        setShareError("La imagen todavia se esta preparando. Intenta compartir de nuevo en un momento.");
-        return;
-      }
-
-      if (!navigator.canShare?.({ files: [image.file] })) {
-        downloadBlob(image.blob, image.fileName);
-        setShareError("El navegador abre compartir, pero no acepta imagenes generadas por la web. Descarga la imagen y enviala por WhatsApp.");
-        return;
-      }
-
-      await navigator.share({
-        title: "Estado de cuenta",
-        text: `Estado de cuenta de ${client.full_name}`,
-        files: [image.file],
-      });
-    } catch (shareError) {
-      if (isShareCancelled(shareError)) {
-        setShareError("El envio fue cancelado desde el menu de compartir.");
-        return;
-      }
-
-      if (preparedImageRef.current) {
-        downloadBlob(preparedImageRef.current.blob, preparedImageRef.current.fileName);
-        setShareError("El navegador bloqueo compartir directo. Descargue la imagen y enviela por WhatsApp.");
-        return;
-      }
-
-      setShareError(`No se pudo compartir la imagen. Motivo: ${getErrorDetail(shareError)}`);
+    const whatsAppPhone = toWhatsAppPhone(client.phone ?? "");
+    if (whatsAppPhone.length < 10) {
+      setShareError("El cliente no tiene un telefono valido para WhatsApp.");
+      return;
     }
+
+    const principal = formatMoney(client.balance?.principal_balance_cents ?? 0);
+    const interest = formatMoney(client.balance?.interest_balance_cents ?? 0);
+    const total = formatMoney(client.balance?.total_balance_cents ?? 0);
+    const latestPayment = statementData.latestPayment;
+    const messageLines = [
+      `Hola ${client.full_name}, te comparto tu estado de cuenta de Kredo.`,
+      "",
+      `Capital pendiente: ${principal}`,
+      `Interes pendiente: ${interest}`,
+      `Total pendiente: ${total}`,
+      latestPayment ? "" : null,
+      latestPayment ? `Ultimo pago: ${formatMoney(latestPayment.total_amount_cents)}` : null,
+      latestPayment ? `Fecha del ultimo pago: ${latestPayment.payment_date}` : null,
+      "",
+      `Actualizado al ${toDateInputValue()}.`,
+    ].filter((line): line is string => line !== null);
+    const whatsAppUrl = `https://wa.me/${whatsAppPhone}?text=${encodeURIComponent(messageLines.join("\n"))}`;
+    const whatsAppWindow = window.open(whatsAppUrl, "_blank", "noopener,noreferrer");
+    if (!whatsAppWindow) window.location.assign(whatsAppUrl);
   }
 
   return (
@@ -211,12 +192,11 @@ export function ClientStatementPage() {
       <div className="mt-2 grid grid-cols-2 gap-2 print:hidden">
         <button
           className="inline-flex min-h-12 items-center justify-center gap-2 rounded-md bg-kredo-green px-4 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
-          disabled={isPreparingImage}
-          onClick={handleShareImage}
+          onClick={handleWhatsAppStatement}
           type="button"
         >
-          <Share2 className="h-5 w-5" aria-hidden="true" />
-          Compartir
+          <MessageCircle className="h-5 w-5" aria-hidden="true" />
+          WhatsApp
         </button>
         <button
           className="inline-flex min-h-12 items-center justify-center gap-2 rounded-md border border-kredo-line bg-white px-4 py-3 font-semibold disabled:cursor-not-allowed disabled:opacity-60"
