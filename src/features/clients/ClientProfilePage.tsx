@@ -1,8 +1,7 @@
 import { ChevronRight, MessageCircle, Phone, X } from "lucide-react";
 import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import html2canvas from "html2canvas";
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { MetricCard } from "@/components/ui/MetricCard";
 import { StatusBadge } from "@/components/ui/StatusBadge";
@@ -21,7 +20,6 @@ import {
   resumeClientInterest,
 } from "@/services/interest-policy.service";
 import { getClientStatement } from "@/services/statements.service";
-import { ClientStatementCard } from "@/features/statements/ClientStatementCard";
 import { toWhatsAppPhone } from "@/lib/phone";
 
 const movementLabels: Record<ClientMovementRow["movement_type"], string> = {
@@ -35,26 +33,13 @@ const movementLabels: Record<ClientMovementRow["movement_type"], string> = {
 type InterestPolicyAction = "rate" | "freeze" | "resume";
 type ClientProfileTab = "summary" | "interest" | "history";
 
-function downloadBlob(blob: Blob, fileName: string) {
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = fileName;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
-}
-
 export function ClientProfilePage() {
   const { clientId = "" } = useParams();
   const { user } = useAuth();
   const { organizationId } = useOrganization();
   const queryClient = useQueryClient();
-  const statementRef = useRef<HTMLElement | null>(null);
   const [activeTab, setActiveTab] = useState<ClientProfileTab>("summary");
   const [contactActionsOpen, setContactActionsOpen] = useState(false);
-  const [isPreparingWhatsApp, setIsPreparingWhatsApp] = useState(false);
   const [whatsAppMessage, setWhatsAppMessage] = useState("");
   const [movementToVoid, setMovementToVoid] = useState<ClientMovementRow | null>(null);
   const [voidReason, setVoidReason] = useState("");
@@ -255,7 +240,7 @@ export function ClientProfilePage() {
     setContactActionsOpen(true);
   }
 
-  async function handleWhatsAppStatement() {
+  function handleWhatsAppStatement() {
     if (!client?.phone) {
       setWhatsAppMessage("Este cliente no tiene un telefono registrado.");
       return;
@@ -267,45 +252,33 @@ export function ClientProfilePage() {
       return;
     }
 
-    if (!statementData || !statementRef.current) {
+    if (!statementData?.client) {
       setWhatsAppMessage("El estado de cuenta todavia se esta preparando. Intenta nuevamente en un momento.");
       return;
     }
 
     setWhatsAppMessage("");
-    setIsPreparingWhatsApp(true);
-    const whatsAppWindow = window.open("about:blank", "_blank");
-
-    try {
-      const canvas = await html2canvas(statementRef.current, {
-        backgroundColor: "#ffffff",
-        scale: 2,
-        useCORS: true,
-      });
-      const blob = await new Promise<Blob>((resolve, reject) => {
-        canvas.toBlob((result) => {
-          if (result) resolve(result);
-          else reject(new Error("Image could not be created"));
-        }, "image/png");
-      });
-      const fileName = `estado-${client.full_name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || "cliente"}.png`;
-      downloadBlob(blob, fileName);
-
-      const text = encodeURIComponent(`Hola ${client.full_name}, te comparto tu estado de cuenta actualizado.`);
-      const whatsAppUrl = `https://wa.me/${whatsAppPhone}?text=${text}`;
-      if (whatsAppWindow) {
-        whatsAppWindow.location.replace(whatsAppUrl);
-      } else {
-        window.location.assign(whatsAppUrl);
-      }
-
-      setWhatsAppMessage("La imagen se descargo y se abrio el chat correcto. Adjuntala y confirma el envio en WhatsApp.");
-    } catch {
-      whatsAppWindow?.close();
-      setWhatsAppMessage("No se pudo preparar la imagen. Abre el estado de cuenta e intenta compartirlo desde alli.");
-    } finally {
-      setIsPreparingWhatsApp(false);
-    }
+    const statementClient = statementData.client;
+    const principal = formatMoney(statementClient.balance?.principal_balance_cents ?? 0);
+    const interest = formatMoney(statementClient.balance?.interest_balance_cents ?? 0);
+    const total = formatMoney(statementClient.balance?.total_balance_cents ?? 0);
+    const latestPayment = statementData.latestPayment;
+    const messageLines = [
+      `Hola ${statementClient.full_name}, te comparto tu estado de cuenta de Kredo.`,
+      "",
+      `Capital pendiente: ${principal}`,
+      `Interes pendiente: ${interest}`,
+      `Total pendiente: ${total}`,
+      latestPayment ? "" : null,
+      latestPayment ? `Ultimo pago: ${formatMoney(latestPayment.total_amount_cents)}` : null,
+      latestPayment ? `Fecha del ultimo pago: ${latestPayment.payment_date}` : null,
+      "",
+      `Actualizado al ${toDateInputValue()}.`,
+    ].filter((line): line is string => line !== null);
+    const whatsAppUrl = `https://wa.me/${whatsAppPhone}?text=${encodeURIComponent(messageLines.join("\n"))}`;
+    const whatsAppWindow = window.open(whatsAppUrl, "_blank", "noopener,noreferrer");
+    if (!whatsAppWindow) window.location.assign(whatsAppUrl);
+    setWhatsAppMessage("Se abrio el chat con el estado de cuenta listo. Solo falta presionar Enviar en WhatsApp.");
   }
 
   if (isLoading) {
@@ -675,12 +648,6 @@ export function ClientProfilePage() {
       </div>
       ) : null}
 
-      {statementData ? (
-        <div aria-hidden="true" className="pointer-events-none fixed left-[-10000px] top-0 w-[720px]">
-          <ClientStatementCard data={statementData} ref={statementRef} />
-        </div>
-      ) : null}
-
       {contactActionsOpen ? (
         <div className="fixed inset-0 z-40 flex items-end bg-black/30 px-4 pb-4" onClick={() => setContactActionsOpen(false)}>
           <section
@@ -714,15 +681,15 @@ export function ClientProfilePage() {
 
             <button
               className="mt-2 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-md bg-kredo-green px-4 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
-              disabled={isPreparingWhatsApp || statementLoading || Boolean(statementError)}
+              disabled={statementLoading || Boolean(statementError)}
               onClick={handleWhatsAppStatement}
               type="button"
             >
               <MessageCircle className="h-5 w-5" aria-hidden="true" />
-              {isPreparingWhatsApp ? "Preparando imagen..." : statementLoading ? "Cargando estado..." : "Enviar estado por WhatsApp"}
+              {statementLoading ? "Cargando estado..." : "Enviar estado por WhatsApp"}
             </button>
             <p className="mt-2 text-xs text-kredo-muted">
-              Se descargara la imagen y se abrira el chat de este numero. Solo debes adjuntarla y confirmar el envio.
+              Se abrira el chat de este numero con el saldo y el ultimo pago ya escritos. Solo debes presionar Enviar.
             </p>
 
             {statementError ? (
